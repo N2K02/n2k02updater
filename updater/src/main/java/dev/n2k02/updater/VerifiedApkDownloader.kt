@@ -25,6 +25,7 @@ class VerifiedApkDownloader(private val context: Context) {
     ): File = withContext(Dispatchers.IO) {
         require(release.apkUrl.startsWith("https://")) { "Only HTTPS downloads are supported" }
         val directory = File(context.cacheDir, "n2k02-updates").apply { mkdirs() }
+        if (!directory.isDirectory) throw IOException("Cannot create update cache")
         val temp = File.createTempFile("update-", ".part", directory)
         try {
             val connection = openSecureConnection(release.apkUrl)
@@ -36,6 +37,8 @@ class VerifiedApkDownloader(private val context: Context) {
                     throw IOException("APK download failed (HTTP ${connection.responseCode})")
                 }
                 val total = connection.contentLengthLong.takeIf { it > 0 } ?: release.apkSize
+                val maxBytes = 1024L * 1024L * 1024L
+                if (total != null && total > maxBytes) throw IOException("APK exceeds download limit")
                 val digest = MessageDigest.getInstance("SHA-256")
                 var received = 0L
                 connection.inputStream.use { input ->
@@ -48,6 +51,7 @@ class VerifiedApkDownloader(private val context: Context) {
                             output.write(buffer, 0, count)
                             digest.update(buffer, 0, count)
                             received += count
+                            if (received > maxBytes) throw IOException("APK exceeds download limit")
                             onProgress(total?.takeIf { it > 0 }?.let {
                                 (received.toFloat() / it).coerceIn(0f, 1f)
                             })
