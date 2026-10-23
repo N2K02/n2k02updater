@@ -3,12 +3,6 @@ name: Publish private updater package
 on:
   push:
     branches: [main]
-  workflow_dispatch:
-    inputs:
-      version:
-        description: 'Package version (e.g. 0.1.0)'
-        required: true
-        type: string
 
 permissions:
   contents: read
@@ -36,13 +30,13 @@ jobs:
       - uses: gradle/actions/setup-gradle@v4
         with:
           gradle-version: '8.14.3'
+      # One release channel: each merge to main publishes the next 0.1.x version.
       - name: Verify and publish
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
-          MANUAL_VERSION: ${{ inputs.version }}
         run: |
-          VERSION="${MANUAL_VERSION:-0.1.0-main.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}}"
+          VERSION="0.1.${GITHUB_RUN_NUMBER}"
           echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$' || exit 1
           gradle :updater:testDebugUnitTest :updater:publishReleasePublicationToGitHubPackagesRepository -PupdaterVersion="$VERSION" --stacktrace
           echo "Published dev.n2k02:updater:${VERSION}" >> "$GITHUB_STEP_SUMMARY"
