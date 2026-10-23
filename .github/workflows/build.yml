@@ -3,6 +3,21 @@ on:
   push:
     branches: [main, feature/updater-core]
   pull_request:
+  workflow_dispatch:
+    inputs:
+      publish_package:
+        description: "Publish private updater package to GitHub Packages"
+        type: boolean
+        required: true
+        default: false
+      updater_version:
+        description: "Package version, e.g. 0.1.0"
+        type: string
+        required: false
+        default: "0.1.0"
+permissions:
+  contents: read
+  packages: write
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -22,3 +37,30 @@ jobs:
           gradle-version: '8.14.3'
       - name: Compile updater
         run: gradle :updater:assembleDebug :updater:assembleRelease :updater:generatePomFileForReleasePublication :updater:testDebugUnitTest --stacktrace
+
+  publish:
+    if: github.event_name == 'workflow_dispatch' && inputs.publish_package == true && github.ref == 'refs/heads/main'
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+      - name: Install Android SDK
+        run: |
+          SDKMANAGER="$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager"
+          if [ ! -x "$SDKMANAGER" ]; then SDKMANAGER=$(find "$ANDROID_HOME/cmdline-tools" -name sdkmanager -type f | head -1); fi
+          "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0"
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '8.14.3'
+      - name: Publish verified release package
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_ACTOR: ${{ github.actor }}
+          UPDATER_VERSION: ${{ inputs.updater_version }}
+        run: |
+          echo "$UPDATER_VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$' || { echo "Invalid package version"; exit 1; }
+          gradle :updater:publishReleasePublicationToGitHubPackagesRepository -PupdaterVersion="$UPDATER_VERSION" --stacktrace
