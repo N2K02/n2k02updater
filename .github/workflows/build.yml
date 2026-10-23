@@ -36,7 +36,12 @@ jobs:
         with:
           gradle-version: '8.14.3'
       - name: Compile updater
-        run: gradle :updater:assembleDebug :updater:assembleRelease :updater:generatePomFileForReleasePublication :updater:testDebugUnitTest --stacktrace
+        run: gradle :updater:assembleDebug :updater:assembleRelease :updater:generatePomFileForReleasePublication :updater:testDebugUnitTest :updater:publishReleasePublicationToMavenLocal -PupdaterVersion=0.1.0-ci --stacktrace
+      - name: Verify staged Maven package
+        run: |
+          test -s "$HOME/.m2/repository/dev/n2k02/updater/0.1.0-ci/updater-0.1.0-ci.aar"
+          test -s "$HOME/.m2/repository/dev/n2k02/updater/0.1.0-ci/updater-0.1.0-ci.pom"
+          test -s "$HOME/.m2/repository/dev/n2k02/updater/0.1.0-ci/updater-0.1.0-ci.module"
 
   publish:
     if: github.event_name == 'workflow_dispatch' && inputs.publish_package == true && github.ref == 'refs/heads/main'
