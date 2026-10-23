@@ -21,6 +21,7 @@ class UpdaterController(
     context: Context,
     private val config: UpdateConfig,
     private val releaseSource: GitHubReleaseSource = GitHubReleaseSource(),
+    private val publishedSource: PublishedUpdateSource? = null,
     private val installer: UpdaterInstaller = UpdaterInstaller(),
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main),
 ) {
@@ -35,7 +36,10 @@ class UpdaterController(
         operation = scope.launch {
             mutableStatus.value = UpdateStatus.Checking
             try {
-                val release = withContext(Dispatchers.IO) { releaseSource.latest(config) }
+                val release = withContext(Dispatchers.IO) {
+                    publishedSource?.latest(config) ?: if (config.experimentalEnabled && publishedSource != null) null
+                    else releaseSource.latest(config)
+                }
                 mutableStatus.value = if (release == null) UpdateStatus.Current
                     else UpdateStatus.Available(release)
             } catch (cancel: CancellationException) {
