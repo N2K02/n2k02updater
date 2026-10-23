@@ -65,13 +65,17 @@ class UpdaterController(
     }
 
     fun install(activity: Activity, guard: UpdateInstallGuard) {
-        val state = mutableStatus.value as? UpdateStatus.Ready ?: return
+        val state = when (val current = mutableStatus.value) {
+            is UpdateStatus.Ready -> current.release
+            is UpdateStatus.NeedsInstallPermission -> current.release
+            else -> return
+        }
         val file = verifiedFile ?: return
         operation?.cancel()
         operation = scope.launch {
             try {
                 if (!installer.canRequestInstall(activity)) {
-                    mutableStatus.value = UpdateStatus.NeedsInstallPermission(state.release)
+                    mutableStatus.value = UpdateStatus.NeedsInstallPermission(state)
                     return@launch
                 }
                 if (!installer.install(activity, file, guard)) {
