@@ -12,7 +12,6 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
-import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LoadingIndicator
@@ -47,7 +46,7 @@ fun N2K02UpdateScreen(
     val activity = LocalContext.current.findActivity()
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("App updates", style = MaterialTheme.typography.titleLarge)
-        Card(Modifier.fillMaxWidth(), shape = RoundedCornerShape(28.dp)) {
+        Card(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large) {
             Column(
                 modifier = Modifier.padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
