@@ -33,7 +33,8 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
 
 /**
  * Reusable Settings > About & updates content. The host provides its own install guard.
- * Compose colors and typography inherit the app's MaterialTheme / N2K02Theme.
+ * Compose colors and typography inherit the host's Material 3 Expressive theme.
+ * The host owns the theme; this screen must not override its colors or motion.
  */
 @Composable
 fun N2K02UpdateScreen(
@@ -45,7 +46,7 @@ fun N2K02UpdateScreen(
     val activity = LocalContext.current.findActivity()
     Column(modifier = modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Text("App updates", style = MaterialTheme.typography.titleLarge)
-        Card(Modifier.fillMaxWidth()) {
+        Card(Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large) {
             Column(
                 modifier = Modifier.padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
