@@ -15,8 +15,7 @@ class PublishedUpdateSource(private val manifestBaseUrl: String) {
 
     fun latest(config: UpdateConfig): UpdateRelease? {
         val channel = if (config.experimentalEnabled) "experimental" else "stable"
-        val connection = URL("${manifestBaseUrl.trimEnd('/')}/$channel.json")
-            .openConnection() as HttpURLConnection
+        val connection = openSecureManifest("${manifestBaseUrl.trimEnd('/')}/$channel.json")
         try {
             connection.connectTimeout = 10_000
             connection.readTimeout = 15_000
@@ -28,6 +27,30 @@ class PublishedUpdateSource(private val manifestBaseUrl: String) {
             return parse(connection.inputStream.bufferedReader().use { it.readText() },
                 config.installedVersionCode, config.experimentalEnabled)
         } finally { connection.disconnect() }
+    }
+
+    private fun openSecureManifest(source: String): HttpURLConnection {
+        var target = URL(source)
+        repeat(6) {
+            if (target.protocol != "https") throw IOException("Insecure manifest redirect rejected")
+            val connection = target.openConnection() as HttpURLConnection
+            connection.connectTimeout = 10_000
+            connection.readTimeout = 15_000
+            connection.instanceFollowRedirects = false
+            connection.setRequestProperty("Accept", "application/json")
+            connection.setRequestProperty("User-Agent", "N2K02Updater-Android")
+            val status = connection.responseCode
+            if (status in 300..399) {
+                val location = connection.getHeaderField("Location")
+                    ?: throw IOException("Manifest redirect has no destination")
+                val next = URL(target, location)
+                connection.disconnect()
+                target = next
+            } else {
+                return connection
+            }
+        }
+        throw IOException("Too many manifest redirects")
     }
 
     companion object {
