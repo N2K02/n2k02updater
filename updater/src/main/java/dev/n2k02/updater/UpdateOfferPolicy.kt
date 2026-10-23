@@ -15,4 +15,8 @@ object UpdateOfferPolicy {
 
     fun shouldOffer(release: UpdateRelease, skippedTag: String?, manual: Boolean): Boolean =
         manual || skippedTag != release.tag
+    /** Background checks fail quietly; explicit user checks report the error. */
+    fun checkFailure(manual: Boolean, diagnostics: String?): UpdateStatus =
+        if (manual) UpdateStatus.Failed("Could not check for updates", diagnostics)
+        else UpdateStatus.Idle
 }
