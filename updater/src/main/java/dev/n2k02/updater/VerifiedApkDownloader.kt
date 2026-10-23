@@ -30,9 +30,8 @@ class VerifiedApkDownloader(private val context: Context) {
         try {
             val connection = openSecureConnection(release.apkUrl)
             try {
-                connection.connectTimeout = 15_000
-                connection.readTimeout = 30_000
-                connection.instanceFollowRedirects = false
+                // openSecureConnection already configured and opened this connection.
+                // Do not mutate its settings after reading responseCode.
                 if (connection.responseCode != HttpURLConnection.HTTP_OK) {
                     throw IOException("APK download failed (HTTP ${connection.responseCode})")
                 }
