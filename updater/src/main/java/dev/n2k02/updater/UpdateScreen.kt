@@ -54,7 +54,7 @@ fun N2K02UpdateScreen(
                 when (val state = status) {
                     UpdateStatus.Idle -> {
                         Text("Check for the latest version.")
-                        Button(onClick = controller::check) { Text("Check for updates") }
+                        FilledTonalButton(onClick = controller::check) { Text("Check again") }
                     }
                     UpdateStatus.Checking -> {
                         Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
