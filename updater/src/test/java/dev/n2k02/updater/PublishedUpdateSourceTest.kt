@@ -51,4 +51,26 @@ class PublishedUpdateSourceTest {
     fun rejectsInvalidChecksum() {
         PublishedUpdateSource.parse(manifest(sha256 = "bad"), 1L, false)
     }
+    @Test fun experimentalSubscribersReceiveNewerStableRelease() {
+        val stable = PublishedUpdateSource.parse(manifest(versionCode = 26), 20L, false)
+        val experimental = PublishedUpdateSource.parse(manifest(versionCode = 25), 20L, true)
+        val selected = PublishedUpdateSource.newest(stable, experimental)
+        assertEquals(26L, requireNotNull(selected).versionCode)
+        assertTrue(!selected.experimental)
+    }
+
+    @Test fun experimentalSubscribersReceiveNewerExperimentalRelease() {
+        val stable = PublishedUpdateSource.parse(manifest(versionCode = 25), 20L, false)
+        val experimental = PublishedUpdateSource.parse(manifest(versionCode = 26), 20L, true)
+        val selected = PublishedUpdateSource.newest(stable, experimental)
+        assertEquals(26L, requireNotNull(selected).versionCode)
+        assertTrue(selected.experimental)
+    }
+
+    @Test fun fallsBackToStableWhenExperimentalUnavailable() {
+        val stable = PublishedUpdateSource.parse(manifest(versionCode = 26), 20L, false)
+        assertEquals(stable, PublishedUpdateSource.newest(stable, null))
+        assertNull(PublishedUpdateSource.newest(null, null))
+    }
+
 }
