@@ -4,6 +4,7 @@ import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
 import org.json.JSONObject
+import org.json.JSONException
 
 /**
  * Reads signed-release metadata published as public JSON by each app's CI.
@@ -65,8 +66,15 @@ class PublishedUpdateSource(private val manifestBaseUrl: String) {
             listOfNotNull(stable, experimental).maxByOrNull { it.versionCode }
 
         fun parse(json: String, installedVersionCode: Long, experimental: Boolean): UpdateRelease? {
-            val data = JSONObject(json)
+            // Normalize malformed JSON into an I/O failure so the controller's
+            // public GitHub fallback also handles corrupt published metadata.
+            val data = try {
+                JSONObject(json)
+            } catch (error: JSONException) {
+                throw IOException("Invalid update manifest JSON", error)
+            }
             val code = data.optLong("versionCode")
+            if (code <= 0L) throw IOException("Invalid update manifest versionCode")
             if (code <= installedVersionCode) return null
             val url = data.optString("apkUrl")
             val digest = data.optString("sha256").lowercase()
@@ -75,7 +83,8 @@ class PublishedUpdateSource(private val manifestBaseUrl: String) {
             }
             val notes = data.optJSONArray("notes")
             return UpdateRelease(
-                tag = data.getString("tag"),
+                tag = data.optString("tag").takeIf { it.isNotBlank() }
+                    ?: throw IOException("Invalid update manifest tag"),
                 versionCode = code,
                 notes = notes?.let { array ->
                     (0 until array.length()).map { array.optString(it) }.take(12)
