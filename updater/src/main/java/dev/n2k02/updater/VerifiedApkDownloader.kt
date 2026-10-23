@@ -81,7 +81,8 @@ class VerifiedApkDownloader(private val context: Context) {
 
     private fun verifyPackage(file: File, config: UpdateConfig) {
         val pm = context.packageManager
-        val flags = PackageManager.GET_SIGNING_CERTIFICATES
+        val flags = if (Build.VERSION.SDK_INT >= 28) PackageManager.GET_SIGNING_CERTIFICATES
+            else PackageManager.GET_SIGNATURES
         @Suppress("DEPRECATION")
         val archive = if (Build.VERSION.SDK_INT >= 33) {
             pm.getPackageArchiveInfo(file.absolutePath, PackageManager.PackageInfoFlags.of(flags.toLong()))
@@ -97,8 +98,14 @@ class VerifiedApkDownloader(private val context: Context) {
         } else {
             pm.getPackageInfo(config.packageName, flags)
         }
-        val archiveSigners = archive.signingInfo?.apkContentsSigners?.map { it.toCharsString() }?.toSet()
-        val trustedSigners = installed.signingInfo?.apkContentsSigners?.map { it.toCharsString() }?.toSet()
+        @Suppress("DEPRECATION")
+        val archiveSigners = if (Build.VERSION.SDK_INT >= 28) {
+            archive.signingInfo?.apkContentsSigners?.map { it.toCharsString() }?.toSet()
+        } else archive.signatures?.map { it.toCharsString() }?.toSet()
+        @Suppress("DEPRECATION")
+        val trustedSigners = if (Build.VERSION.SDK_INT >= 28) {
+            installed.signingInfo?.apkContentsSigners?.map { it.toCharsString() }?.toSet()
+        } else installed.signatures?.map { it.toCharsString() }?.toSet()
         if (archiveSigners.isNullOrEmpty() || trustedSigners.isNullOrEmpty() ||
             archiveSigners != trustedSigners) {
             throw IOException("APK signing certificate does not match installed app")
