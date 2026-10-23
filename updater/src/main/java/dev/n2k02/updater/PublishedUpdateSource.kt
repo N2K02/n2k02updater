@@ -14,7 +14,16 @@ class PublishedUpdateSource(private val manifestBaseUrl: String) {
     init { require(manifestBaseUrl.startsWith("https://")) }
 
     fun latest(config: UpdateConfig): UpdateRelease? {
-        val channel = if (config.experimentalEnabled) "experimental" else "stable"
+        // Experimental users still receive the newest stable release when appropriate.
+        // The optional experimental feed must not hide an available stable update.
+        val experimental = if (config.experimentalEnabled) {
+            runCatching { loadChannel("experimental", config.installedVersionCode, true) }.getOrNull()
+        } else null
+        val stable = loadChannel("stable", config.installedVersionCode, false)
+        return newest(stable, experimental)
+    }
+
+    private fun loadChannel(channel: String, installedVersionCode: Long, experimental: Boolean): UpdateRelease? {
         val connection = openSecureManifest("${manifestBaseUrl.trimEnd('/')}/$channel.json")
         try {
             // openSecureManifest configures headers and follows HTTPS-only redirects.
@@ -23,7 +32,7 @@ class PublishedUpdateSource(private val manifestBaseUrl: String) {
             if (status == 404) return null
             if (status != 200) throw IOException("Update manifest unavailable (HTTP $status)")
             return parse(connection.inputStream.bufferedReader().use { it.readText() },
-                config.installedVersionCode, config.experimentalEnabled)
+                installedVersionCode, experimental)
         } finally { connection.disconnect() }
     }
 
@@ -52,6 +61,9 @@ class PublishedUpdateSource(private val manifestBaseUrl: String) {
     }
 
     companion object {
+        fun newest(stable: UpdateRelease?, experimental: UpdateRelease?): UpdateRelease? =
+            listOfNotNull(stable, experimental).maxByOrNull { it.versionCode }
+
         fun parse(json: String, installedVersionCode: Long, experimental: Boolean): UpdateRelease? {
             val data = JSONObject(json)
             val code = data.optLong("versionCode")
