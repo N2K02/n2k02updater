@@ -2,6 +2,7 @@ package dev.n2k02.updater
 
 import android.app.Activity
 import android.content.Context
+import android.content.SharedPreferences
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -24,6 +25,7 @@ class UpdaterController(
     private val publishedSource: PublishedUpdateSource? = null,
     private val installer: UpdaterInstaller = UpdaterInstaller(),
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main),
+    private val offerPreferences: SharedPreferences? = null,
 ) {
     private val downloader = VerifiedApkDownloader(context.applicationContext)
     private val mutableStatus = MutableStateFlow<UpdateStatus>(UpdateStatus.Idle)
@@ -31,7 +33,10 @@ class UpdaterController(
     private var operation: Job? = null
     private var verifiedFile: File? = null
 
-    fun check() {
+    fun check(manual: Boolean = true) {
+        if (!manual && offerPreferences != null && !UpdateOfferPolicy.isDue(
+                System.currentTimeMillis(), offerPreferences.getLong("lastCheck", 0L)
+            )) return
         operation?.cancel()
         operation = scope.launch {
             mutableStatus.value = UpdateStatus.Checking
@@ -40,14 +45,24 @@ class UpdaterController(
                     if (publishedSource != null) publishedSource.latest(config)
                     else releaseSource.latest(config)
                 }
-                mutableStatus.value = if (release == null) UpdateStatus.Current
-                    else UpdateStatus.Available(release)
+                offerPreferences?.edit()?.putLong("lastCheck", System.currentTimeMillis())?.apply()
+                mutableStatus.value = when {
+                    release == null -> if (manual) UpdateStatus.Current else UpdateStatus.Idle
+                    !UpdateOfferPolicy.shouldOffer(release, offerPreferences?.getString("skipped", null), manual) -> UpdateStatus.Idle
+                    else -> UpdateStatus.Available(release)
+                }
             } catch (cancel: CancellationException) {
                 throw cancel
             } catch (error: Exception) {
                 mutableStatus.value = UpdateStatus.Failed("Could not check for updates", error.message)
             }
         }
+    }
+
+    /** Dismiss this release for automatic checks; manual checks may still offer it. */
+    fun skip(release: UpdateRelease) {
+        offerPreferences?.edit()?.putString("skipped", release.tag)?.apply()
+        dismiss()
     }
 
     fun download(release: UpdateRelease) {
