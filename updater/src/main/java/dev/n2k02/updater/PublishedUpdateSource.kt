@@ -17,10 +17,8 @@ class PublishedUpdateSource(private val manifestBaseUrl: String) {
         val channel = if (config.experimentalEnabled) "experimental" else "stable"
         val connection = openSecureManifest("${manifestBaseUrl.trimEnd('/')}/$channel.json")
         try {
-            connection.connectTimeout = 10_000
-            connection.readTimeout = 15_000
-            connection.setRequestProperty("Accept", "application/json")
-            connection.setRequestProperty("User-Agent", "N2K02Updater-Android")
+            // openSecureManifest configures headers and follows HTTPS-only redirects.
+            // Accessing responseCode there already connects; setters here would throw.
             val status = connection.responseCode
             if (status == 404) return null
             if (status != 200) throw IOException("Update manifest unavailable (HTTP $status)")
