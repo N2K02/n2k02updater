@@ -37,7 +37,7 @@ class UpdaterController(
             mutableStatus.value = UpdateStatus.Checking
             try {
                 val release = withContext(Dispatchers.IO) {
-                    publishedSource?.latest(config) ?: if (config.experimentalEnabled && publishedSource != null) null
+                    if (publishedSource != null) publishedSource.latest(config)
                     else releaseSource.latest(config)
                 }
                 mutableStatus.value = if (release == null) UpdateStatus.Current
