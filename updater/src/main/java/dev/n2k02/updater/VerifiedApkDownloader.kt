@@ -90,12 +90,11 @@ class VerifiedApkDownloader(private val context: Context) {
         } ?: throw IOException("Downloaded file is not a valid APK")
         if (archive.packageName != config.packageName) throw IOException("APK package name mismatch")
         val version = if (Build.VERSION.SDK_INT >= 28) archive.longVersionCode
-            else { @Suppress("DEPRECATION") archive.versionCode.toLong() }
+            else archive.versionCode.toLong()
         if (version <= config.installedVersionCode) throw IOException("APK is not newer than installed version")
         val installed = if (Build.VERSION.SDK_INT >= 33) {
             pm.getPackageInfo(config.packageName, PackageManager.PackageInfoFlags.of(flags.toLong()))
         } else {
-            @Suppress("DEPRECATION")
             pm.getPackageInfo(config.packageName, flags)
         }
         val archiveSigners = archive.signingInfo?.apkContentsSigners?.map { it.toCharsString() }?.toSet()
