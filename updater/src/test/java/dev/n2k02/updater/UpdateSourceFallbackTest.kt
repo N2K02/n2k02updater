@@ -3,6 +3,7 @@ package dev.n2k02.updater
 import java.io.IOException
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNull
+import org.junit.Assert.fail
 import org.junit.Test
 
 class UpdateSourceFallbackTest {
@@ -29,15 +30,20 @@ class UpdateSourceFallbackTest {
         assertEquals(0, calls)
     }
 
-    @Test fun ioFailureFallsBackToGithub() {
-        val actual = UpdateSourceFallback.resolve(
-            published = { throw IOException("offline") },
-            github = { stable },
-        )
-        assertEquals(stable, actual)
+    @Test fun manifestFailureDoesNotDeriveVersionCodeFromGithubTag() {
+        var calls = 0
+        try {
+            UpdateSourceFallback.resolve(
+                published = { throw IOException("manifest offline") },
+                github = { calls++; stable },
+            )
+            fail("Expected the manifest failure to remain visible")
+        } catch (_: IOException) {
+            assertEquals(0, calls)
+        }
     }
 
-    @Test fun noPublishedSourceUsesGithub() {
+    @Test fun noPublishedSourceUsesLegacyGithubSource() {
         assertEquals(stable, UpdateSourceFallback.resolve(null, { stable }))
     }
 
@@ -48,20 +54,4 @@ class UpdateSourceFallbackTest {
             github = { stable },
         )
     }
-
-    @Test(expected = IOException::class)
-    fun githubFailureRemainsVisible() {
-        UpdateSourceFallback.resolve(
-            published = { throw IOException("manifest offline") },
-            github = { throw IOException("GitHub offline") },
-        )
-    }
-    @Test(expected = IOException::class)
-    fun fallbackRejectsMissingChecksum() {
-        UpdateSourceFallback.resolve(
-            published = { throw IOException("manifest offline") },
-            github = { stable.copy(sha256 = null) },
-        )
-    }
-
 }
