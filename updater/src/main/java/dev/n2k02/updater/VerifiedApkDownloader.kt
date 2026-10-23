@@ -27,11 +27,11 @@ class VerifiedApkDownloader(private val context: Context) {
         val directory = File(context.cacheDir, "n2k02-updates").apply { mkdirs() }
         val temp = File.createTempFile("update-", ".part", directory)
         try {
-            val connection = URL(release.apkUrl).openConnection() as HttpURLConnection
+            val connection = openSecureConnection(release.apkUrl)
             try {
                 connection.connectTimeout = 15_000
                 connection.readTimeout = 30_000
-                connection.instanceFollowRedirects = true
+                connection.instanceFollowRedirects = false
                 if (connection.responseCode != HttpURLConnection.HTTP_OK) {
                     throw IOException("APK download failed (HTTP ${connection.responseCode})")
                 }
@@ -77,6 +77,28 @@ class VerifiedApkDownloader(private val context: Context) {
         } finally {
             if (temp.exists()) temp.delete()
         }
+    }
+
+    private fun openSecureConnection(source: String): HttpURLConnection {
+        var target = URL(source)
+        repeat(6) {
+            if (target.protocol != "https") throw IOException("Insecure APK redirect rejected")
+            val connection = target.openConnection() as HttpURLConnection
+            connection.connectTimeout = 15_000
+            connection.readTimeout = 30_000
+            connection.instanceFollowRedirects = false
+            val status = connection.responseCode
+            if (status in 300..399) {
+                val location = connection.getHeaderField("Location")
+                    ?: throw IOException("APK redirect has no destination")
+                val next = URL(target, location)
+                connection.disconnect()
+                target = next
+            } else {
+                return connection
+            }
+        }
+        throw IOException("Too many APK redirects")
     }
 
     private fun verifyPackage(file: File, config: UpdateConfig) {
