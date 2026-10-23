@@ -42,16 +42,10 @@ class UpdaterController(
             mutableStatus.value = UpdateStatus.Checking
             try {
                 val release = withContext(Dispatchers.IO) {
-                    if (publishedSource != null) {
-                        // Published metadata is authoritative when reachable, even if
-                        // no newer version exists. Only network/parse failures fall
-                        // back to public GitHub Releases.
-                        try {
-                            publishedSource.latest(config)
-                        } catch (error: java.io.IOException) {
-                            releaseSource.latest(config)
-                        }
-                    } else releaseSource.latest(config)
+                    UpdateSourceFallback.resolve(
+                        published = publishedSource?.let { source -> { source.latest(config) } },
+                        github = { releaseSource.latest(config) },
+                    )
                 }
                 offerPreferences?.edit()?.putLong("lastCheck", System.currentTimeMillis())?.apply()
                 mutableStatus.value = when {
