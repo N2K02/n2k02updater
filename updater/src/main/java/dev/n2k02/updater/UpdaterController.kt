@@ -56,7 +56,10 @@ class UpdaterController(
             } catch (cancel: CancellationException) {
                 throw cancel
             } catch (error: Exception) {
-                mutableStatus.value = UpdateStatus.Failed("Could not check for updates", error.message)
+                // Match the existing MRadio behavior: a background check should
+                // neither interrupt the UI with an error nor retry on every resume.
+                offerPreferences?.edit()?.putLong("lastCheck", System.currentTimeMillis())?.apply()
+                mutableStatus.value = UpdateOfferPolicy.checkFailure(manual, error.message)
             }
         }
     }
