@@ -2,6 +2,7 @@ package dev.n2k02.updater
 
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
+import org.junit.Assert.assertEquals
 import org.junit.Test
 
 class UpdateOfferPolicyTest {
@@ -27,4 +28,15 @@ class UpdateOfferPolicyTest {
         assertTrue(UpdateOfferPolicy.shouldOffer(release, "v2.0", manual = true))
         assertTrue(UpdateOfferPolicy.shouldOffer(release, "v1.9", manual = false))
     }
+    @Test fun automaticCheckFailureIsSilent() {
+        assertEquals(UpdateStatus.Idle, UpdateOfferPolicy.checkFailure(false, "offline"))
+    }
+
+    @Test fun manualCheckFailureShowsDiagnostics() {
+        assertEquals(
+            UpdateStatus.Failed("Could not check for updates", "offline"),
+            UpdateOfferPolicy.checkFailure(true, "offline"),
+        )
+    }
+
 }
