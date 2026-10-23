@@ -138,6 +138,8 @@ class VerifiedApkDownloader(private val context: Context) {
                 else info.signingCertificateHistory)?.map { it.toCharsString() }?.toSet()
             }
         } else installed.signatures?.map { it.toCharsString() }?.toSet()
+        // Shared signing history is a compatibility preflight; Android remains the
+        // authority on whether a lineage is valid for the installed package.
         if (archiveSigners.isNullOrEmpty() || trustedSigners.isNullOrEmpty() ||
             archiveSigners.intersect(trustedSigners).isEmpty()) {
             throw IOException("APK signing certificate does not match installed app")
