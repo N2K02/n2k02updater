@@ -79,7 +79,7 @@ class UpdaterController(
                     return@launch
                 }
                 if (!installer.install(activity, file, guard)) {
-                    mutableStatus.value = UpdateStatus.Ready(state.release)
+                    mutableStatus.value = UpdateStatus.Ready(state)
                 }
             } catch (cancel: CancellationException) {
                 throw cancel
