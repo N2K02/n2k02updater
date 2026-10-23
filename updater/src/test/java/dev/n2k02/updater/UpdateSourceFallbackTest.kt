@@ -56,4 +56,12 @@ class UpdateSourceFallbackTest {
             github = { throw IOException("GitHub offline") },
         )
     }
+    @Test(expected = IOException::class)
+    fun fallbackRejectsMissingChecksum() {
+        UpdateSourceFallback.resolve(
+            published = { throw IOException("manifest offline") },
+            github = { stable.copy(sha256 = null) },
+        )
+    }
+
 }
