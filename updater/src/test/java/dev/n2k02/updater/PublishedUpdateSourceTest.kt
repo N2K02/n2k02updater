@@ -73,4 +73,22 @@ class PublishedUpdateSourceTest {
         assertNull(PublishedUpdateSource.newest(null, null))
     }
 
+    @Test(expected = IOException::class)
+    fun corruptJsonIsRecoverableIoFailure() {
+        PublishedUpdateSource.parse("{broken", 1L, false)
+    }
+
+    @Test(expected = IOException::class)
+    fun missingVersionCodeIsNotTreatedAsUpToDate() {
+        PublishedUpdateSource.parse(
+            """{"tag":"v2.4","apkUrl":"https://example.org/app.apk","sha256":"$digest"}""",
+            10L, false,
+        )
+    }
+
+    @Test(expected = IOException::class)
+    fun blankTagIsRejected() {
+        PublishedUpdateSource.parse(manifest().replace("v2.4", ""), 1L, false)
+    }
+
 }
