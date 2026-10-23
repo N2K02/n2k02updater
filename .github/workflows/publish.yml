@@ -45,4 +45,4 @@ jobs:
           VERSION="${MANUAL_VERSION:-0.1.0-main.${GITHUB_RUN_NUMBER}.${GITHUB_RUN_ATTEMPT}}"
           echo "$VERSION" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.-]+)?$' || exit 1
           gradle :updater:testDebugUnitTest :updater:publishReleasePublicationToGitHubPackagesRepository -PupdaterVersion="$VERSION" --stacktrace
-          echo "Published `dev.n2k02:updater:${VERSION}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Published dev.n2k02:updater:${VERSION}" >> "$GITHUB_STEP_SUMMARY"
