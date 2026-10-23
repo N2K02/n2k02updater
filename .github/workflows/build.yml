@@ -21,4 +21,4 @@ jobs:
         with:
           gradle-version: '8.14.3'
       - name: Compile updater
-        run: gradle :updater:assembleDebug --stacktrace
+        run: gradle :updater:assembleDebug :updater:testDebugUnitTest --stacktrace
