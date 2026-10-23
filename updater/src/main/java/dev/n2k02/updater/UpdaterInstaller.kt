@@ -34,7 +34,10 @@ class UpdaterInstaller {
         guard: UpdateInstallGuard,
     ): Boolean {
         if (!guard.mayInstall()) return false
-        if (!verifiedApk.isFile || verifiedApk.extension.lowercase() != "apk") {
+        val trustedDirectory = File(activity.cacheDir, "n2k02-updates").canonicalFile
+        if (!verifiedApk.isFile || verifiedApk.extension.lowercase() != "apk" ||
+            verifiedApk.canonicalFile.parentFile != trustedDirectory ||
+            !verifiedApk.name.startsWith("verified-")) {
             throw IOException("Verified APK is missing")
         }
         if (!canRequestInstall(activity)) return false
