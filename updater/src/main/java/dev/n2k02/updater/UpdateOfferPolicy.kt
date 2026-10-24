@@ -18,8 +18,11 @@ object UpdateOfferPolicy {
             nowMillis - lastCheckMillis >= intervalMillis
     }
 
+    fun skippedKey(release: UpdateRelease): String =
+        (if (release.experimental) "experimental:" else "stable:") + release.tag
+
     fun shouldOffer(release: UpdateRelease, skippedTag: String?, manual: Boolean): Boolean =
-        manual || skippedTag != release.tag
+        manual || (skippedTag != release.tag && skippedTag != skippedKey(release))
     /** Background checks fail quietly; explicit user checks report the error. */
     fun checkFailure(manual: Boolean, diagnostics: String?): UpdateStatus =
         if (manual) UpdateStatus.Failed("Could not check for updates", diagnostics)
