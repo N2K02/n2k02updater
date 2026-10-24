@@ -24,6 +24,7 @@ data class UpdateRelease(
     val apkSize: Long?,
     val sha256: String?,
     val experimental: Boolean,
+    val publishedAtMillis: Long? = null,
 )
 
 sealed interface UpdateStatus {
@@ -33,9 +34,17 @@ sealed interface UpdateStatus {
     data class Available(val release: UpdateRelease) : UpdateStatus
     data class Downloading(val release: UpdateRelease, val progress: Float?) : UpdateStatus
     data class NeedsInstallPermission(val release: UpdateRelease) : UpdateStatus
-    data class Ready(val release: UpdateRelease) : UpdateStatus
-    data class Failed(val message: String, val diagnostics: String? = null) : UpdateStatus
+    data class Ready(val release: UpdateRelease, val notice: String? = null) : UpdateStatus
+    data class Failed(
+        val message: String,
+        val diagnostics: String? = null,
+        val release: UpdateRelease? = null,
+        val retryAction: UpdateRetryAction = UpdateRetryAction.CHECK,
+    ) : UpdateStatus
 }
+
+/** Recovery action for failed checks, downloads, or installer launches. */
+enum class UpdateRetryAction { CHECK, DOWNLOAD, INSTALL }
 
 /**
  * Host-controlled guard, e.g. BCam must stop recording before opening the installer.
