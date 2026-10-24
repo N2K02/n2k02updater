@@ -85,7 +85,7 @@ internal object UpdateOfferSnapshot {
             UpdateRelease(
                 tag = tag,
                 versionCode = code,
-                notes = (0 until minOf(notesJson.length(), 12)).map(notesJson::optString),
+                notes = (0 until minOf(notesJson.length(), 12)).map { notesJson.optString(it) },
                 apkUrl = url,
                 apkSize = offer.optLong("apkSize").takeIf { it > 0 },
                 sha256 = checksum,
