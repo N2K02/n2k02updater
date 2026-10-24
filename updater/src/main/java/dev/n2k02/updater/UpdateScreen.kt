@@ -18,6 +18,11 @@ import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -67,9 +72,35 @@ fun N2K02UpdateScreen(
                         FilledTonalButton(onClick = controller::check) { Text("Check again") }
                     }
                     is UpdateStatus.Available -> {
-                        Text("Update available: ${state.release.tag}", style = MaterialTheme.typography.titleMedium)
-                        state.release.notes.forEach { Text("• $it", style = MaterialTheme.typography.bodyMedium) }
-                        Button(onClick = { controller.download(state.release) }) { Text("Download update") }
+                        val release = state.release
+                        var notesExpanded by remember(release.tag) { mutableStateOf(false) }
+                        var notesOverflowed by remember(release.tag) { mutableStateOf(false) }
+                        Text("Update available: ${release.tag}", style = MaterialTheme.typography.titleMedium)
+
+                        // All shared updater actions precede the changelog: long notes cannot
+                        // push Download out of sight. No app-specific fallback action.
+                        Button(
+                            modifier = Modifier.fillMaxWidth(),
+                            onClick = { controller.download(release) },
+                        ) { Text("Download update") }
+
+                        if (release.notes.isNotEmpty()) {
+                            Text("What's new", style = MaterialTheme.typography.titleSmall)
+                            Text(
+                                text = release.notes.joinToString("\n") { "• $it" },
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = if (notesExpanded) Int.MAX_VALUE else 8,
+                                overflow = TextOverflow.Ellipsis,
+                                onTextLayout = { result ->
+                                    if (!notesExpanded) notesOverflowed = result.hasVisualOverflow
+                                },
+                            )
+                            if (notesOverflowed || notesExpanded) {
+                                TextButton(onClick = { notesExpanded = !notesExpanded }) {
+                                    Text(if (notesExpanded) "Show less" else "Show more")
+                                }
+                            }
+                        }
                     }
                     is UpdateStatus.Downloading -> {
                         Text("Downloading and verifying ${state.release.tag}")
