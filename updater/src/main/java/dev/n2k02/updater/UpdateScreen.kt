@@ -56,6 +56,16 @@ fun N2K02UpdateScreen(
                 modifier = Modifier.padding(16.dp),
                 verticalArrangement = Arrangement.spacedBy(12.dp),
             ) {
+                // Keep the same New indicator visible across available, downloading,
+                // ready-to-install, and install-permission states.
+                if (status.hasPendingUpdate()) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.End,
+                    ) {
+                        N2K02UpdateBadge(status)
+                    }
+                }
                 when (val state = status) {
                     UpdateStatus.Idle -> {
                         Text("Check for the latest version.")
