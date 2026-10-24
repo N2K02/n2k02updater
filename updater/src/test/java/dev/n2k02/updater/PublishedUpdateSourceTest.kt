@@ -22,6 +22,13 @@ class PublishedUpdateSourceTest {
         "notes":["Important fix"]
     }""".trimIndent()
 
+    @Test fun optionalPublishedDateIsParsedButNotRequired() {
+        val json = manifest().replace("\"notes\":[", "\"publishedAt\":\"2025-10-25T00:00:00Z\",\"notes\":[")
+        val dated = PublishedUpdateSource.parse(json, 1L, false)
+        assertEquals(1761350400000L, requireNotNull(dated).publishedAtMillis)
+        assertNull(PublishedUpdateSource.parse(manifest(), 1L, false)?.publishedAtMillis)
+    }
+
     @Test fun readsNewerStableRelease() {
         val release = PublishedUpdateSource.parse(manifest(), 23L, false)
         requireNotNull(release)
