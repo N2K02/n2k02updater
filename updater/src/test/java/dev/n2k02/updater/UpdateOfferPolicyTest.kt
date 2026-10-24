@@ -28,6 +28,13 @@ class UpdateOfferPolicyTest {
         assertTrue(UpdateOfferPolicy.shouldOffer(release, "v2.0", manual = true))
         assertTrue(UpdateOfferPolicy.shouldOffer(release, "v1.9", manual = false))
     }
+    @Test fun skipAppliesOnlyToSelectedReleaseChannel() {
+        val skippedStable = UpdateOfferPolicy.skippedKey(release)
+        assertFalse(UpdateOfferPolicy.shouldOffer(release, skippedStable, false))
+        assertTrue(UpdateOfferPolicy.shouldOffer(release.copy(experimental = true), skippedStable, false))
+        assertFalse(UpdateOfferPolicy.shouldOffer(release, "v2.0", false)) // legacy preference
+    }
+
     @Test fun automaticCheckFailureIsSilent() {
         assertEquals(UpdateStatus.Idle, UpdateOfferPolicy.checkFailure(false, "offline"))
     }
