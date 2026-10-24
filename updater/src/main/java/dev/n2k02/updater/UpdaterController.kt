@@ -63,24 +63,21 @@ class UpdaterController(
     fun onHostResume(activity: Activity, installGuard: UpdateInstallGuard) {
         when (val current = status.value) {
             is UpdateStatus.NeedsInstallPermission -> {
-                if (installer.canRequestInstall(activity)) {
-                    mutableStatus.value = UpdateStatus.Ready(
-                        current.release, "Permission granted. Tap Install update to continue."
-                    )
-                }
+                mutableStatus.value = InstallReturnPolicy.afterPermission(
+                    current.release, installer.canRequestInstall(activity)
+                )
             }
             is UpdateStatus.Ready -> {
                 if (installerOpened) {
                     installerOpened = false
-                    if (isVersionInstalled(current.release.versionCode)) {
+                    val next = InstallReturnPolicy.afterInstaller(
+                        current.release, isVersionInstalled(current.release.versionCode)
+                    )
+                    if (next == UpdateStatus.Current) {
                         offerCache.clear()
                         verifiedFile = null
-                        mutableStatus.value = UpdateStatus.Current
-                    } else {
-                        mutableStatus.value = current.copy(
-                            notice = "Installation was not completed. You can try again."
-                        )
                     }
+                    mutableStatus.value = next
                 }
             }
             is UpdateStatus.Downloading -> Unit
