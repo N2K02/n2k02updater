@@ -80,7 +80,7 @@ internal object UpdateOfferSnapshot {
                 !url.startsWith("https://") ||
                 !checksum.matches(checksumPattern) ||
                 (experimental && !config.experimentalEnabled) ||
-                skippedTag == tag) return@runCatching null
+                !UpdateOfferPolicy.shouldOffer(UpdateRelease(tag, code, emptyList(), url, null, checksum, experimental), skippedTag, false)) return@runCatching null
 
             val notesJson = offer.optJSONArray("notes") ?: JSONArray()
             UpdateRelease(
