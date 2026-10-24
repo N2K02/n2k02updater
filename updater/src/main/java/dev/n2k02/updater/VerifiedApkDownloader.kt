@@ -41,6 +41,13 @@ class VerifiedApkDownloader(private val context: Context) {
         }
 
         var offset = partial.takeIf { it.isFile }?.length() ?: 0L
+        release.apkSize?.takeIf { it > 0L }?.let { size ->
+            val bytesStillNeeded = (size - offset).coerceAtLeast(0L)
+            val available = directory.usableSpace
+            if (available > 0L && bytesStillNeeded > available - 5L * 1024 * 1024) {
+                throw IOException("Not enough free storage for this update")
+            }
+        }
         var connection = openSecureConnection(release.apkUrl, offset.takeIf { it > 0 })
         try {
             if (offset > 0L &&
