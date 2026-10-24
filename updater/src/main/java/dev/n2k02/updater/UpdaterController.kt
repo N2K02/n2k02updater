@@ -35,6 +35,9 @@ class UpdaterController(
         offerCache.restore()?.let { UpdateStatus.Available(it) } ?: UpdateStatus.Idle
     )
     val status: StateFlow<UpdateStatus> = mutableStatus
+    private val mutableLastCheckedAt = MutableStateFlow(offerPreferences?.getLong("lastCheck", 0L) ?: 0L)
+    /** Last completed update-check attempt in epoch milliseconds, or 0 if unknown. */
+    val lastCheckedAt: StateFlow<Long> = mutableLastCheckedAt
     private var operation: Job? = null
     private var verifiedFile: File? = null
 
@@ -72,7 +75,9 @@ class UpdaterController(
                     UpdateOfferPolicy.shouldOffer(it, offerPreferences?.getString("skipped", null), manual)
                 }
                 if (offered == null) offerCache.clear() else offerCache.save(offered)
-                offerPreferences?.edit()?.putLong("lastCheck", System.currentTimeMillis())?.apply()
+                val checkedAt = System.currentTimeMillis()
+                offerPreferences?.edit()?.putLong("lastCheck", checkedAt)?.apply()
+                mutableLastCheckedAt.value = checkedAt
                 mutableStatus.value = when {
                     offered != null -> UpdateStatus.Available(offered)
                     manual -> UpdateStatus.Current
@@ -83,7 +88,9 @@ class UpdaterController(
             } catch (error: Exception) {
                 // A temporary offline or HTTP failure must not erase an already
                 // validated offer. Background failures remain silent and throttled.
-                offerPreferences?.edit()?.putLong("lastCheck", System.currentTimeMillis())?.apply()
+                val checkedAt = System.currentTimeMillis()
+                offerPreferences?.edit()?.putLong("lastCheck", checkedAt)?.apply()
+                mutableLastCheckedAt.value = checkedAt
                 mutableStatus.value = previousOffer
                     ?: UpdateOfferPolicy.checkFailure(manual, error.message)
             }
