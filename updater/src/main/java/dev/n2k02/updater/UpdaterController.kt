@@ -28,18 +28,54 @@ class UpdaterController(
     private val offerPreferences: SharedPreferences? = null,
 ) {
     private val downloader = VerifiedApkDownloader(context.applicationContext)
-    private val mutableStatus = MutableStateFlow<UpdateStatus>(UpdateStatus.Idle)
+    private val offerCache = UpdateOfferCache(offerPreferences, config)
+    // Restore the last known offer immediately, even when the automatic check is
+    // throttled. Never restore a Ready state without re-verifying the APK.
+    private val mutableStatus = MutableStateFlow<UpdateStatus>(
+        offerCache.restore()?.let { UpdateStatus.Available(it) } ?: UpdateStatus.Idle
+    )
     val status: StateFlow<UpdateStatus> = mutableStatus
+    private val mutableLastCheckedAt = MutableStateFlow(offerPreferences?.getLong("lastCheck", 0L) ?: 0L)
+    /** Last completed update-check attempt in epoch milliseconds, or 0 if unknown. */
+    val lastCheckedAt: StateFlow<Long> = mutableLastCheckedAt
     private var operation: Job? = null
     private var verifiedFile: File? = null
 
+    /**
+     * Safe to invoke every time the app enters the foreground, regardless of
+     * whether the current state is Idle, Current, or Available. A pending offer
+     * stays visible while a background refresh checks for a newer release.
+     */
+    fun refreshIfDue() = check(manual = false)
+
+    /**
+     * Preferred common Activity.onResume hook. Unlike older per-app wrappers,
+     * this refreshes after Current and Failed as well as Idle. Checking remains
+     * throttled and never interrupts an in-progress download or install.
+     */
+    fun onHostResume(activity: Activity, installGuard: UpdateInstallGuard) {
+        when (status.value) {
+            is UpdateStatus.NeedsInstallPermission -> install(activity, installGuard)
+            else -> refreshIfDue()
+        }
+    }
+
     fun check(manual: Boolean = true) {
+        // A background refresh must not cancel an APK download or an installation.
+        when (mutableStatus.value) {
+            is UpdateStatus.Downloading, is UpdateStatus.Ready,
+            is UpdateStatus.NeedsInstallPermission -> return
+            else -> Unit
+        }
+        if (!manual && operation?.isActive == true) return
         if (!manual && offerPreferences != null && !UpdateOfferPolicy.isDue(
                 System.currentTimeMillis(), offerPreferences.getLong("lastCheck", 0L)
             )) return
         operation?.cancel()
         operation = scope.launch {
-            mutableStatus.value = UpdateStatus.Checking
+            val previousOffer = mutableStatus.value as? UpdateStatus.Available
+            // Avoid hiding a known update (and its badge) during revalidation.
+            if (previousOffer == null) mutableStatus.value = UpdateStatus.Checking
             try {
                 val release = withContext(Dispatchers.IO) {
                     UpdateSourceFallback.resolve(
@@ -47,19 +83,28 @@ class UpdaterController(
                         github = { releaseSource.latest(config) },
                     )
                 }
-                offerPreferences?.edit()?.putLong("lastCheck", System.currentTimeMillis())?.apply()
+                val offered = release?.takeIf {
+                    UpdateOfferPolicy.shouldOffer(it, offerPreferences?.getString("skipped", null), manual)
+                }
+                if (offered == null) offerCache.clear() else offerCache.save(offered)
+                val checkedAt = System.currentTimeMillis()
+                offerPreferences?.edit()?.putLong("lastCheck", checkedAt)?.apply()
+                mutableLastCheckedAt.value = checkedAt
                 mutableStatus.value = when {
-                    release == null -> if (manual) UpdateStatus.Current else UpdateStatus.Idle
-                    !UpdateOfferPolicy.shouldOffer(release, offerPreferences?.getString("skipped", null), manual) -> UpdateStatus.Idle
-                    else -> UpdateStatus.Available(release)
+                    offered != null -> UpdateStatus.Available(offered)
+                    manual -> UpdateStatus.Current
+                    else -> UpdateStatus.Idle
                 }
             } catch (cancel: CancellationException) {
                 throw cancel
             } catch (error: Exception) {
-                // Match the existing MRadio behavior: a background check should
-                // neither interrupt the UI with an error nor retry on every resume.
-                offerPreferences?.edit()?.putLong("lastCheck", System.currentTimeMillis())?.apply()
-                mutableStatus.value = UpdateOfferPolicy.checkFailure(manual, error.message)
+                // A temporary offline or HTTP failure must not erase an already
+                // validated offer. Background failures remain silent and throttled.
+                val checkedAt = System.currentTimeMillis()
+                offerPreferences?.edit()?.putLong("lastCheck", checkedAt)?.apply()
+                mutableLastCheckedAt.value = checkedAt
+                mutableStatus.value = previousOffer
+                    ?: UpdateOfferPolicy.checkFailure(manual, error.message)
             }
         }
     }
@@ -67,6 +112,7 @@ class UpdaterController(
     /** Dismiss this release for automatic checks; manual checks may still offer it. */
     fun skip(release: UpdateRelease) {
         offerPreferences?.edit()?.putString("skipped", release.tag)?.apply()
+        offerCache.clear()
         dismiss()
     }
 
@@ -118,7 +164,12 @@ class UpdaterController(
     fun cancel() {
         operation?.cancel()
         operation = null
-        mutableStatus.value = UpdateStatus.Idle
+        // Cancelling a download does not mean the new release disappeared.
+        // Return to the available offer so the badge and download action remain.
+        mutableStatus.value = when (val previous = mutableStatus.value) {
+            is UpdateStatus.Downloading -> UpdateStatus.Available(previous.release)
+            else -> UpdateStatus.Idle
+        }
     }
 
     fun dismiss() {
