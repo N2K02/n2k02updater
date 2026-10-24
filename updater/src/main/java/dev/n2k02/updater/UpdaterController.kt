@@ -165,7 +165,7 @@ class UpdaterController(
 
     /** Explicitly ignore a release for automatic checks. Manual checks still show it. */
     fun skip(release: UpdateRelease) {
-        offerPreferences?.edit()?.putString("skipped", release.tag)?.apply()
+        offerPreferences?.edit()?.putString("skipped", UpdateOfferPolicy.skippedKey(release))?.apply()
         offerCache.clear()
         operation?.cancel()
         operation = null
