@@ -55,6 +55,55 @@ automatically inject navigation items; each consuming app must wire its menu and
 submenu slots to these shared components. Update badges remain visible until the
 pending-update state clears; simply opening the update page does not clear them.
 
+
+## Complete shared About & updates page
+
+Each app can now open **one** shared page from its existing Settings submenu.
+Use `N2K02UpdatePage` for a standalone scrollable Settings destination, or
+`N2K02UpdateScreen` for an existing scrollable Settings container.
+
+The page inherits the host's Material 3 colors, shapes and typography and includes:
+- Installed app name, version name and Android versionCode.
+- Last installed/updated time from Android's package manager.
+- Last completed update check, retained across restarts.
+- Available version, build number, release channel and known APK size.
+- Persistent `New` badge for pending stable and experimental updates.
+- User-initiated check, download/progress/cancel, install, install permission, retry,
+  skip-version, diagnostics and expandable release notes.
+- Optional experimental-release switch driven by the host's existing preferences.
+- No automatic installation; the app-supplied install guard is always enforced.
+
+```kotlin
+// Settings > About & updates page; the host still supplies Back navigation.
+val experimental by LiveUpdater.experimentalEnabled.collectAsState()
+N2K02UpdatePage(
+    controller = LiveUpdater.controller,
+    installGuard = LiveUpdater.installGuard,
+    experimentalEnabled = experimental,
+    onExperimentalEnabledChange = LiveUpdater::setExperimentalEnabled,
+)
+```
+
+To reliably detect releases while the app stays alive, call this on **every**
+`Activity.onResume()`, regardless of the current update status:
+
+```kotlin
+LiveUpdater.controller.onHostResume(this, LiveUpdater.installGuard)
+```
+
+This replaces the older `if (status == Idle) check(manual = false)` pattern
+that never refreshed when the status remained `Current`. The check interval is
+still 12 hours to avoid needless requests. Opening the shared update page
+also performs a throttled refresh, and the **Check again** button bypasses
+the throttle.
+
+If the previous offer is still newer than the installed APK, it is restored
+immediately after restarting the app—even when the next network check is
+throttled or temporarily fails. Only release metadata is restored, not a
+downloaded APK's verification status. After process death, the user must
+download and verify the APK again before installing. Changing apps, installed
+versions, or release channels invalidates stale cached offers.
+
 ## Rollout
 - Stage 1: extract and test mRadio's existing behaviour without regression.
 - Stage 2: pilot mRadio and BCam; preserve BCam's recording-safety gate.
