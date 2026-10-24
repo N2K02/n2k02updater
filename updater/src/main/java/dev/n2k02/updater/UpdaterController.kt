@@ -152,7 +152,12 @@ class UpdaterController(
     fun cancel() {
         operation?.cancel()
         operation = null
-        mutableStatus.value = UpdateStatus.Idle
+        // Cancelling a download does not mean the new release disappeared.
+        // Return to the available offer so the badge and download action remain.
+        mutableStatus.value = when (val previous = mutableStatus.value) {
+            is UpdateStatus.Downloading -> UpdateStatus.Available(previous.release)
+            else -> UpdateStatus.Idle
+        }
     }
 
     fun dismiss() {
