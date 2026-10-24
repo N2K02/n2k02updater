@@ -18,6 +18,11 @@ import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -68,8 +73,33 @@ fun N2K02UpdateScreen(
                     }
                     is UpdateStatus.Available -> {
                         Text("Update available: ${state.release.tag}", style = MaterialTheme.typography.titleMedium)
-                        state.release.notes.forEach { Text("• $it", style = MaterialTheme.typography.bodyMedium) }
-                        Button(onClick = { controller.download(state.release) }) { Text("Download update") }
+                        // Keep the standard updater action visible even when a build
+                        // carries a long changelog. This is the only download action.
+                        Button(
+                            onClick = { controller.download(state.release) },
+                            modifier = Modifier.fillMaxWidth(),
+                        ) { Text("Download update") }
+                        if (state.release.notes.isNotEmpty()) {
+                            val notes = state.release.notes.joinToString("\n") { "• $it" }
+                            var expanded by remember(state.release.tag) { mutableStateOf(false) }
+                            var truncated by remember(state.release.tag) { mutableStateOf(false) }
+                            Text(
+                                text = notes,
+                                style = MaterialTheme.typography.bodyMedium,
+                                maxLines = if (expanded) Int.MAX_VALUE else 8,
+                                overflow = TextOverflow.Ellipsis,
+                                onTextLayout = { layout ->
+                                    if (!expanded && truncated != layout.hasVisualOverflow) {
+                                        truncated = layout.hasVisualOverflow
+                                    }
+                                },
+                            )
+                            if (expanded || truncated) {
+                                TextButton(onClick = { expanded = !expanded }) {
+                                    Text(if (expanded) "Show less" else "Show more")
+                                }
+                            }
+                        }
                     }
                     is UpdateStatus.Downloading -> {
                         Text("Downloading and verifying ${state.release.tag}")
