@@ -3,6 +3,7 @@ package dev.n2k02.updater
 import android.app.Activity
 import android.content.Context
 import android.content.SharedPreferences
+import android.os.Build
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -15,8 +16,9 @@ import kotlinx.coroutines.withContext
 import java.io.File
 
 /**
- * Per-app update coordinator. No automatic installs; the host explicitly calls install().
- * An app should retain this instance for its settings screen lifecycle.
+ * Per-application update coordinator. The host should retain one instance while
+ * the app process runs; do not recreate it on every Activity configuration change.
+ * Only the host can start an installation, and host install guards are mandatory.
  */
 class UpdaterController(
     context: Context,
@@ -27,41 +29,75 @@ class UpdaterController(
     private val scope: CoroutineScope = CoroutineScope(SupervisorJob() + Dispatchers.Main),
     private val offerPreferences: SharedPreferences? = null,
 ) {
-    private val downloader = VerifiedApkDownloader(context.applicationContext)
+    private val appContext = context.applicationContext
+    private val downloader = VerifiedApkDownloader(appContext)
     private val offerCache = UpdateOfferCache(offerPreferences, config)
-    // Restore the last known offer immediately, even when the automatic check is
-    // throttled. Never restore a Ready state without re-verifying the APK.
     private val mutableStatus = MutableStateFlow<UpdateStatus>(
         offerCache.restore()?.let { UpdateStatus.Available(it) } ?: UpdateStatus.Idle
     )
     val status: StateFlow<UpdateStatus> = mutableStatus
+
     private val mutableLastCheckedAt = MutableStateFlow(offerPreferences?.getLong("lastCheck", 0L) ?: 0L)
-    /** Last completed update-check attempt in epoch milliseconds, or 0 if unknown. */
+    /** Time of most recent attempted network check (successful or failed). */
     val lastCheckedAt: StateFlow<Long> = mutableLastCheckedAt
+
+    private val mutableLastSuccessfulCheckAt = MutableStateFlow(
+        offerPreferences?.getLong("lastSuccessfulCheck", 0L) ?: 0L
+    )
+    /** Time of most recent successful check, separate from failed attempts. */
+    val lastSuccessfulCheckAt: StateFlow<Long> = mutableLastSuccessfulCheckAt
+
+    private val mutableLastCheckFailed = MutableStateFlow(
+        offerPreferences?.getBoolean("lastCheckFailed", false) ?: false
+    )
+    val lastCheckFailed: StateFlow<Boolean> = mutableLastCheckFailed
+
     private var operation: Job? = null
     private var verifiedFile: File? = null
+    private var installerOpened = false
 
-    /**
-     * Safe to invoke every time the app enters the foreground, regardless of
-     * whether the current state is Idle, Current, or Available. A pending offer
-     * stays visible while a background refresh checks for a newer release.
-     */
+    /** Throttled automatic refresh that preserves pending downloads and install state. */
     fun refreshIfDue() = check(manual = false)
 
-    /**
-     * Preferred common Activity.onResume hook. Unlike older per-app wrappers,
-     * this refreshes after Current and Failed as well as Idle. Checking remains
-     * throttled and never interrupts an in-progress download or install.
-     */
+    /** Invoke from Activity.onResume without gating on Idle or Current. */
     fun onHostResume(activity: Activity, installGuard: UpdateInstallGuard) {
-        when (status.value) {
-            is UpdateStatus.NeedsInstallPermission -> install(activity, installGuard)
+        when (val current = status.value) {
+            is UpdateStatus.NeedsInstallPermission -> {
+                mutableStatus.value = InstallReturnPolicy.afterPermission(
+                    current.release, installer.canRequestInstall(activity)
+                )
+            }
+            is UpdateStatus.Ready -> {
+                if (installerOpened) {
+                    installerOpened = false
+                    val next = InstallReturnPolicy.afterInstaller(
+                        current.release, isVersionInstalled(current.release.versionCode)
+                    )
+                    if (next == UpdateStatus.Current) {
+                        offerCache.clear()
+                        verifiedFile = null
+                    }
+                    mutableStatus.value = next
+                }
+            }
+            is UpdateStatus.Downloading -> Unit
+            is UpdateStatus.Failed -> {
+                if (current.release == null) refreshIfDue()
+            }
             else -> refreshIfDue()
         }
     }
 
+    @Suppress("DEPRECATION")
+    private fun isVersionInstalled(versionCode: Long): Boolean = runCatching {
+        val info = appContext.packageManager.getPackageInfo(appContext.packageName, 0)
+        val installed = if (Build.VERSION.SDK_INT >= 28) info.longVersionCode
+            else info.versionCode.toLong()
+        installed >= versionCode
+    }.getOrDefault(false)
+
     fun check(manual: Boolean = true) {
-        // A background refresh must not cancel an APK download or an installation.
+        // Never cancel a verified install or an active download to run a check.
         when (mutableStatus.value) {
             is UpdateStatus.Downloading, is UpdateStatus.Ready,
             is UpdateStatus.NeedsInstallPermission -> return
@@ -69,12 +105,19 @@ class UpdaterController(
         }
         if (!manual && operation?.isActive == true) return
         if (!manual && offerPreferences != null && !UpdateOfferPolicy.isDue(
-                System.currentTimeMillis(), offerPreferences.getLong("lastCheck", 0L)
+                System.currentTimeMillis(),
+                offerPreferences.getLong("lastCheck", 0L),
+                UpdateOfferPolicy.retryInterval(mutableLastCheckFailed.value),
             )) return
+
         operation?.cancel()
         operation = scope.launch {
-            val previousOffer = mutableStatus.value as? UpdateStatus.Available
-            // Avoid hiding a known update (and its badge) during revalidation.
+            val previous = mutableStatus.value
+            val previousOffer = when (previous) {
+                is UpdateStatus.Available -> previous.release
+                is UpdateStatus.Failed -> previous.release
+                else -> null
+            }
             if (previousOffer == null) mutableStatus.value = UpdateStatus.Checking
             try {
                 val release = withContext(Dispatchers.IO) {
@@ -84,12 +127,20 @@ class UpdaterController(
                     )
                 }
                 val offered = release?.takeIf {
-                    UpdateOfferPolicy.shouldOffer(it, offerPreferences?.getString("skipped", null), manual)
+                    UpdateOfferPolicy.shouldOffer(
+                        it, offerPreferences?.getString("skipped", null), manual
+                    )
                 }
                 if (offered == null) offerCache.clear() else offerCache.save(offered)
-                val checkedAt = System.currentTimeMillis()
-                offerPreferences?.edit()?.putLong("lastCheck", checkedAt)?.apply()
-                mutableLastCheckedAt.value = checkedAt
+                val time = System.currentTimeMillis()
+                offerPreferences?.edit()
+                    ?.putLong("lastCheck", time)
+                    ?.putLong("lastSuccessfulCheck", time)
+                    ?.putBoolean("lastCheckFailed", false)
+                    ?.apply()
+                mutableLastCheckedAt.value = time
+                mutableLastSuccessfulCheckAt.value = time
+                mutableLastCheckFailed.value = false
                 mutableStatus.value = when {
                     offered != null -> UpdateStatus.Available(offered)
                     manual -> UpdateStatus.Current
@@ -98,27 +149,34 @@ class UpdaterController(
             } catch (cancel: CancellationException) {
                 throw cancel
             } catch (error: Exception) {
-                // A temporary offline or HTTP failure must not erase an already
-                // validated offer. Background failures remain silent and throttled.
-                val checkedAt = System.currentTimeMillis()
-                offerPreferences?.edit()?.putLong("lastCheck", checkedAt)?.apply()
-                mutableLastCheckedAt.value = checkedAt
-                mutableStatus.value = previousOffer
-                    ?: UpdateOfferPolicy.checkFailure(manual, error.message)
+                val time = System.currentTimeMillis()
+                offerPreferences?.edit()?.putLong("lastCheck", time)
+                    ?.putBoolean("lastCheckFailed", true)?.apply()
+                mutableLastCheckedAt.value = time
+                mutableLastCheckFailed.value = true
+                // On a temporary network error, never erase an existing known release.
+                mutableStatus.value = when {
+                    previousOffer != null -> UpdateStatus.Available(previousOffer)
+                    else -> UpdateOfferPolicy.checkFailure(manual, error.message)
+                }
             }
         }
     }
 
-    /** Dismiss this release for automatic checks; manual checks may still offer it. */
+    /** Explicitly ignore a release for automatic checks. Manual checks still show it. */
     fun skip(release: UpdateRelease) {
-        offerPreferences?.edit()?.putString("skipped", release.tag)?.apply()
+        offerPreferences?.edit()?.putString("skipped", UpdateOfferPolicy.skippedKey(release))?.apply()
         offerCache.clear()
-        dismiss()
+        operation?.cancel()
+        operation = null
+        mutableStatus.value = UpdateStatus.Idle
     }
 
     fun download(release: UpdateRelease) {
+        if (release.versionCode <= config.installedVersionCode) return
         operation?.cancel()
         verifiedFile = null
+        installerOpened = false
         operation = scope.launch {
             mutableStatus.value = UpdateStatus.Downloading(release, null)
             try {
@@ -129,32 +187,55 @@ class UpdaterController(
             } catch (cancel: CancellationException) {
                 throw cancel
             } catch (error: Exception) {
-                mutableStatus.value = UpdateStatus.Failed("Could not verify update", error.message)
+                mutableStatus.value = UpdateStatus.Failed(
+                    "Download or verification failed", error.message, release,
+                    UpdateRetryAction.DOWNLOAD,
+                )
             }
         }
     }
 
     fun install(activity: Activity, guard: UpdateInstallGuard) {
-        val state = when (val current = mutableStatus.value) {
+        val release = when (val current = mutableStatus.value) {
             is UpdateStatus.Ready -> current.release
             is UpdateStatus.NeedsInstallPermission -> current.release
-            else -> return
+            is UpdateStatus.Failed -> current.release
+                ?.takeIf { current.retryAction == UpdateRetryAction.INSTALL }
+            else -> null
+        } ?: return
+
+        val file = verifiedFile
+        if (file == null || !file.isFile) {
+            mutableStatus.value = UpdateStatus.Failed(
+                "Verified APK is no longer available", "Download the update again.",
+                release, UpdateRetryAction.DOWNLOAD,
+            )
+            return
         }
-        val file = verifiedFile ?: return
         operation?.cancel()
         operation = scope.launch {
             try {
                 if (!installer.canRequestInstall(activity)) {
-                    mutableStatus.value = UpdateStatus.NeedsInstallPermission(state)
+                    mutableStatus.value = UpdateStatus.NeedsInstallPermission(release)
                     return@launch
                 }
-                if (!installer.install(activity, file, guard)) {
-                    mutableStatus.value = UpdateStatus.Ready(state)
+                if (installer.install(activity, file, guard)) {
+                    installerOpened = true
+                    mutableStatus.value = UpdateStatus.Ready(
+                        release, "Android installer opened. Return here if installation is cancelled."
+                    )
+                } else {
+                    mutableStatus.value = UpdateStatus.Ready(
+                        release, "Installation paused by this app. Stop recording, casting, or playback, then retry."
+                    )
                 }
             } catch (cancel: CancellationException) {
                 throw cancel
             } catch (error: Exception) {
-                mutableStatus.value = UpdateStatus.Failed("Could not open Android installer", error.message)
+                mutableStatus.value = UpdateStatus.Failed(
+                    "Could not open Android installer", error.message, release,
+                    UpdateRetryAction.INSTALL,
+                )
             }
         }
     }
@@ -164,15 +245,18 @@ class UpdaterController(
     fun cancel() {
         operation?.cancel()
         operation = null
-        // Cancelling a download does not mean the new release disappeared.
-        // Return to the available offer so the badge and download action remain.
-        mutableStatus.value = when (val previous = mutableStatus.value) {
-            is UpdateStatus.Downloading -> UpdateStatus.Available(previous.release)
+        mutableStatus.value = when (val current = mutableStatus.value) {
+            is UpdateStatus.Downloading -> UpdateStatus.Available(current.release)
             else -> UpdateStatus.Idle
         }
     }
 
+    /** Keep a pending update visible; the user must explicitly skip it to hide it. */
     fun dismiss() {
-        if (mutableStatus.value !is UpdateStatus.Downloading) mutableStatus.value = UpdateStatus.Idle
+        if (mutableStatus.value is UpdateStatus.Downloading) return
+        mutableStatus.value = when (val current = mutableStatus.value) {
+            is UpdateStatus.Failed -> current.release?.let { UpdateStatus.Available(it) } ?: UpdateStatus.Idle
+            else -> current
+        }
     }
 }

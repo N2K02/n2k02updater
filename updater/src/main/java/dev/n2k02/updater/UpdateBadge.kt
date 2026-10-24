@@ -17,6 +17,7 @@ fun UpdateStatus.hasPendingUpdate(): Boolean = when (this) {
     is UpdateStatus.Downloading,
     is UpdateStatus.Ready,
     is UpdateStatus.NeedsInstallPermission -> true
+    is UpdateStatus.Failed -> release != null
     else -> false
 }
 

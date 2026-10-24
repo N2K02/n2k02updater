@@ -6,6 +6,11 @@ package dev.n2k02.updater
  */
 object UpdateOfferPolicy {
     const val DEFAULT_INTERVAL_MS = 12L * 60 * 60 * 1000
+    const val FAILURE_RETRY_INTERVAL_MS = 15L * 60 * 1000
+
+    /** Failed background checks retry sooner than healthy ones; avoid retry storms. */
+    fun retryInterval(previousAttemptFailed: Boolean): Long =
+        if (previousAttemptFailed) FAILURE_RETRY_INTERVAL_MS else DEFAULT_INTERVAL_MS
 
     fun isDue(nowMillis: Long, lastCheckMillis: Long, intervalMillis: Long = DEFAULT_INTERVAL_MS): Boolean {
         require(intervalMillis > 0)
@@ -13,8 +18,11 @@ object UpdateOfferPolicy {
             nowMillis - lastCheckMillis >= intervalMillis
     }
 
+    fun skippedKey(release: UpdateRelease): String =
+        (if (release.experimental) "experimental:" else "stable:") + release.tag
+
     fun shouldOffer(release: UpdateRelease, skippedTag: String?, manual: Boolean): Boolean =
-        manual || skippedTag != release.tag
+        manual || (skippedTag != release.tag && skippedTag != skippedKey(release))
     /** Background checks fail quietly; explicit user checks report the error. */
     fun checkFailure(manual: Boolean, diagnostics: String?): UpdateStatus =
         if (manual) UpdateStatus.Failed("Could not check for updates", diagnostics)

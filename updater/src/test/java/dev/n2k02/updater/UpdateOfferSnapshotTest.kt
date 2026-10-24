@@ -25,6 +25,14 @@ class UpdateOfferSnapshotTest {
     )
 
     @Test
+    fun restoresReleasePublishedTimeAcrossRestart() {
+        val updated = release.copy(publishedAtMillis = 1761350400000L)
+        assertEquals(updated, UpdateOfferSnapshot.decode(
+            UpdateOfferSnapshot.encode(config, updated), config, null
+        ))
+    }
+
+    @Test
     fun restoresKnownOfferAcrossProcessRestartWithoutNetwork() {
         val data = UpdateOfferSnapshot.encode(config, release)
         assertNotNull(data)

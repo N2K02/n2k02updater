@@ -18,71 +18,119 @@ import kotlin.coroutines.coroutineContext
  * This does not grant install permission or start an installation.
  */
 class VerifiedApkDownloader(private val context: Context) {
+    /**
+     * Resume interrupted downloads only when the server honors HTTP Range.
+     * Partial bytes are scoped to the release version AND expected SHA-256 and
+     * are never installable until the complete file is rehashed and verified.
+     */
     suspend fun download(
         release: UpdateRelease,
         config: UpdateConfig,
         onProgress: (Float?) -> Unit = {},
     ): File = withContext(Dispatchers.IO) {
         require(release.apkUrl.startsWith("https://")) { "Only HTTPS downloads are supported" }
+        val expectedHash = release.sha256
+            ?: throw IOException("No SHA-256 digest supplied for this release")
+        require(expectedHash.matches(Regex("[a-fA-F0-9]{64}"))) { "Invalid release checksum" }
         val directory = File(context.cacheDir, "n2k02-updates").apply { mkdirs() }
         if (!directory.isDirectory) throw IOException("Cannot create update cache")
-        val temp = File.createTempFile("update-", ".part", directory)
+        val maxBytes = 1024L * 1024L * 1024L
+        val partial = File(directory, "partial-${release.versionCode}-${expectedHash.take(16).lowercase()}.part")
+        if (partial.length() >= maxBytes || (release.apkSize != null && partial.length() > release.apkSize)) {
+            partial.delete()
+        }
+
+        var offset = partial.takeIf { it.isFile }?.length() ?: 0L
+        release.apkSize?.takeIf { it > 0L }?.let { size ->
+            val bytesStillNeeded = (size - offset).coerceAtLeast(0L)
+            val available = directory.usableSpace
+            if (available > 0L && bytesStillNeeded > available - 5L * 1024 * 1024) {
+                throw IOException("Not enough free storage for this update")
+            }
+        }
+        var connection = openSecureConnection(release.apkUrl, offset.takeIf { it > 0 })
         try {
-            val connection = openSecureConnection(release.apkUrl)
-            try {
-                // openSecureConnection already configured and opened this connection.
-                // Do not mutate its settings after reading responseCode.
-                if (connection.responseCode != HttpURLConnection.HTTP_OK) {
-                    throw IOException("APK download failed (HTTP ${connection.responseCode})")
-                }
-                val total = connection.contentLengthLong.takeIf { it > 0 } ?: release.apkSize
-                val maxBytes = 1024L * 1024L * 1024L
-                if (total != null && total > maxBytes) throw IOException("APK exceeds download limit")
-                val digest = MessageDigest.getInstance("SHA-256")
-                var received = 0L
-                connection.inputStream.use { input ->
-                    temp.outputStream().use { output ->
-                        val buffer = ByteArray(64 * 1024)
-                        while (true) {
-                            coroutineContext.ensureActive()
-                            val count = input.read(buffer)
-                            if (count < 0) break
-                            output.write(buffer, 0, count)
-                            digest.update(buffer, 0, count)
-                            received += count
-                            if (received > maxBytes) throw IOException("APK exceeds download limit")
-                            onProgress(total?.takeIf { it > 0 }?.let {
-                                (received.toFloat() / it).coerceIn(0f, 1f)
-                            })
-                        }
+            if (offset > 0L &&
+                !DownloadResumePolicy.canAppend(
+                    offset, connection.responseCode, connection.getHeaderField("Content-Range")
+                )) {
+                // 200, 416, or a malformed range: restart safely instead of
+                // appending duplicate or mismatched data to an existing file.
+                connection.disconnect()
+                if (!partial.delete()) throw IOException("Cannot reset partial APK")
+                offset = 0L
+                connection = openSecureConnection(release.apkUrl, null)
+            }
+            val status = connection.responseCode
+            if ((offset > 0 && status != HttpURLConnection.HTTP_PARTIAL) ||
+                (offset == 0L && status != HttpURLConnection.HTTP_OK)) {
+                throw IOException("APK download failed (HTTP $status)")
+            }
+            val reportedTotal = if (offset > 0L) {
+                connection.getHeaderField("Content-Range")?.substringAfterLast('/')?.toLongOrNull()
+            } else {
+                connection.contentLengthLong.takeIf { it > 0 }
+            }
+            val total = release.apkSize ?: reportedTotal
+            if (total != null && total > maxBytes) throw IOException("APK exceeds download limit")
+            val digest = MessageDigest.getInstance("SHA-256")
+            if (offset > 0L) {
+                partial.inputStream().use { prior ->
+                    val bytes = ByteArray(64 * 1024)
+                    while (true) {
+                        coroutineContext.ensureActive()
+                        val n = prior.read(bytes)
+                        if (n < 0) break
+                        digest.update(bytes, 0, n)
                     }
                 }
-                if (release.apkSize != null && release.apkSize > 0 && received != release.apkSize) {
-                    throw IOException("APK size mismatch")
-                }
-                val expectedHash = release.sha256
-                    ?: throw IOException("No SHA-256 digest supplied for this release")
-                if (!expectedHash.matches(Regex("[a-fA-F0-9]{64}"))) {
-                    throw IOException("Invalid release checksum")
-                }
-                val actualHash = digest.digest().joinToString("") { "%02x".format(it) }
-                if (!actualHash.equals(expectedHash, ignoreCase = true)) {
-                    throw IOException("APK checksum mismatch")
-                }
-                verifyPackage(temp, config)
-                val destination = File(directory, "verified-${release.versionCode}.apk")
-                if (destination.exists() && !destination.delete()) throw IOException("Cannot replace cached APK")
-                if (!temp.renameTo(destination)) throw IOException("Cannot store verified APK")
-                destination
-            } finally {
-                connection.disconnect()
             }
+            var received = offset
+            onProgress(total?.takeIf { it > 0 }?.let {
+                (received.toFloat() / it).coerceIn(0f, 1f)
+            })
+            connection.inputStream.use { input ->
+                java.io.FileOutputStream(partial, offset > 0L).use { output ->
+                    val bytes = ByteArray(64 * 1024)
+                    while (true) {
+                        coroutineContext.ensureActive()
+                        val n = input.read(bytes)
+                        if (n < 0) break
+                        output.write(bytes, 0, n)
+                        digest.update(bytes, 0, n)
+                        received += n
+                        if (received > maxBytes) throw IOException("APK exceeds download limit")
+                        onProgress(total?.takeIf { it > 0 }?.let {
+                            (received.toFloat() / it).coerceIn(0f, 1f)
+                        })
+                    }
+                }
+            }
+            // A truncated response can be resumed later, but must never install.
+            if (release.apkSize != null && received != release.apkSize) {
+                throw IOException("APK size mismatch; retry to resume download")
+            }
+            val actualHash = digest.digest().joinToString("") { "%02x".format(it) }
+            if (!actualHash.equals(expectedHash, ignoreCase = true)) {
+                partial.delete()
+                throw IOException("APK checksum mismatch")
+            }
+            try {
+                verifyPackage(partial, config)
+            } catch (error: Exception) {
+                partial.delete()
+                throw error
+            }
+            val destination = File(directory, "verified-${release.versionCode}-${expectedHash.take(16).lowercase()}.apk")
+            if (destination.exists() && !destination.delete()) throw IOException("Cannot replace cached APK")
+            if (!partial.renameTo(destination)) throw IOException("Cannot store verified APK")
+            destination
         } finally {
-            if (temp.exists()) temp.delete()
+            connection.disconnect()
         }
     }
 
-    private fun openSecureConnection(source: String): HttpURLConnection {
+    private fun openSecureConnection(source: String, rangeStart: Long?): HttpURLConnection {
         var target = URL(source)
         repeat(6) {
             if (target.protocol != "https") throw IOException("Insecure APK redirect rejected")
@@ -90,6 +138,7 @@ class VerifiedApkDownloader(private val context: Context) {
             connection.connectTimeout = 15_000
             connection.readTimeout = 30_000
             connection.instanceFollowRedirects = false
+            if (rangeStart != null) connection.setRequestProperty("Range", "bytes=$rangeStart-")
             val status = connection.responseCode
             if (status in 300..399) {
                 val location = connection.getHeaderField("Location")
