@@ -27,6 +27,13 @@ class UpdateBadgeTest {
         }
     }
 
+    @Test fun failedDownloadsKeepBadgeUntilRecovered() {
+        val release = release()
+        assertTrue(UpdateStatus.Failed(
+            "network disconnected", null, release, UpdateRetryAction.DOWNLOAD
+        ).hasPendingUpdate())
+    }
+
     @Test
     fun idleCheckingCurrentAndFailureHaveNoPendingBadge() {
         assertFalse(UpdateStatus.Idle.hasPendingUpdate())
