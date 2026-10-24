@@ -93,6 +93,7 @@ class PublishedUpdateSource(private val manifestBaseUrl: String) {
                 apkSize = data.optLong("apkSize").takeIf { it > 0 },
                 sha256 = digest,
                 experimental = experimental,
+                publishedAtMillis = ReleaseDateParser.parse(data.optString("publishedAt").ifBlank { data.optString("releasedAt") }),
             )
         }
     }
