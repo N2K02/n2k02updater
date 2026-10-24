@@ -48,6 +48,18 @@ class UpdaterController(
      */
     fun refreshIfDue() = check(manual = false)
 
+    /**
+     * Preferred common Activity.onResume hook. Unlike older per-app wrappers,
+     * this refreshes after Current and Failed as well as Idle. Checking remains
+     * throttled and never interrupts an in-progress download or install.
+     */
+    fun onHostResume(activity: Activity, installGuard: UpdateInstallGuard) {
+        when (status.value) {
+            is UpdateStatus.NeedsInstallPermission -> install(activity, installGuard)
+            else -> refreshIfDue()
+        }
+    }
+
     fun check(manual: Boolean = true) {
         // A background refresh must not cancel an APK download or an installation.
         when (mutableStatus.value) {
