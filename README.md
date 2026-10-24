@@ -21,8 +21,9 @@ Private, reusable Android in-app updater for N2K02 apps, based on the existing m
 
 The updater now owns the pending-update state check and a Material 3 **New** badge.
 It shows for both stable and experimental releases in `Available`,
-`Downloading`, `Ready`, and `NeedsInstallPermission` states. It does not
-appear for `Idle`, `Checking`, `Current`, or `Failed`.
+`Downloading`, `Ready`, `NeedsInstallPermission`, and recoverable failed
+(download/install) states. It does not appear for `Idle`, `Checking`,
+`Current`, or failed checks without a known pending release.
 `N2K02UpdateScreen` automatically shows the badge inside its update card.
 
 Apps can opt into the same indicator in navigation without duplicating UI or state logic.
@@ -65,10 +66,10 @@ Use `N2K02UpdatePage` for a standalone scrollable Settings destination, or
 The page inherits the host's Material 3 colors, shapes and typography and includes:
 - Installed app name, version name and Android versionCode.
 - Last installed/updated time from Android's package manager.
-- Last completed update check, retained across restarts.
-- Available version, build number, release channel and known APK size.
+- Last successful update check, and the most recent failure when applicable.
+- Available version, build number, release channel, optional publication date and APK size.
 - Persistent `New` badge for pending stable and experimental updates.
-- User-initiated check, download/progress/cancel, install, install permission, retry,
+- User-initiated check, download/progress/cancel, install, install permission, recovery retry,
   skip-version, diagnostics and expandable release notes.
 - Optional experimental-release switch driven by the host's existing preferences.
 - No automatic installation; the app-supplied install guard is always enforced.
@@ -92,17 +93,62 @@ LiveUpdater.controller.onHostResume(this, LiveUpdater.installGuard)
 ```
 
 This replaces the older `if (status == Idle) check(manual = false)` pattern
-that never refreshed when the status remained `Current`. The check interval is
-still 12 hours to avoid needless requests. Opening the shared update page
+that never refreshed when the status remained `Current`. Successful automatic checks are throttled for 12 hours; failed checks are
+throttled to a 15-minute retry interval rather than remaining stale all day. Opening the shared update page
 also performs a throttled refresh, and the **Check again** button bypasses
 the throttle.
 
 If the previous offer is still newer than the installed APK, it is restored
 immediately after restarting the app—even when the next network check is
 throttled or temporarily fails. Only release metadata is restored, not a
-downloaded APK's verification status. After process death, the user must
-download and verify the APK again before installing. Changing apps, installed
+downloaded APK's verification status. Incomplete downloads retain release-specific partial bytes in the app cache.
+If the server supports HTTPS Range requests, a retry or process restart can
+resume from the last saved offset. Without Range support the download restarts.
+**No partial file is ever installable:** SHA-256, APK package identity,
+versionCode and signing identity are checked on the entire APK each time.
+A completed APK's verified/Ready state is not restored after process death;
+it must be verified again before installation. Changing apps, installed
 versions, or release channels invalidates stale cached offers.
+
+
+## Real-world reliability and compatibility
+
+- **Transient failures:** a failed download keeps the release and its **New** badge;
+  retrying does not require checking GitHub again. Failed checks retry on the next
+  app foreground after 15 minutes; successful checks retain the 12-hour throttle.
+- **Storage:** insufficient available space is reported before a known-size APK download.
+- **Connectivity:** known large APKs (20 MiB or larger) require confirmation on
+  metered connections when network status is available; downloads remain user initiated.
+- **Android install:** denied unknown-source permission does not trigger an automatic
+  install on return. User must tap **Install update**. A cancelled installer returns
+  to the verified Ready state with a retry message. Actual installed version determines
+  whether the offer is cleared on return.
+- **Release metadata:** `publishedAt` or `releasedAt` in public update manifests
+  may optionally be an ISO-8601 instant or Unix seconds/milliseconds; if absent,
+  the page omits the release date. GitHub release `published_at` is also supported.
+- **Channels:** skips now apply only to stable or experimental channels separately,
+  while existing legacy skipped-tag values remain supported.
+- **Navigation:** `N2K02UpdatePage` hides its own header by default, avoiding
+  a duplicate title when the host supplies a Settings top bar. Set
+  `showHeader = true` for a full-screen page without an app-level title.
+- **Lifecycle:** host apps MUST retain their `UpdaterController` per application
+  process. In `LiveUpdater.init(context)`, do not recreate an existing controller
+  just because Android has recreated an Activity on rotation. Continue calling
+  `controller.onHostResume(activity, installGuard)` each foreground entry.
+  The shared library cannot prevent an app from explicitly replacing its controller.
+- **Install guards:** the library never auto-installs; recording, playback, calls,
+  casting and other active-operation guards remain host-specific.
+
+## One-batch test checklist
+
+The Android library CI runs compilation and all JVM unit tests covering offer
+persistence, version/channel migration, checksum metadata, bad manifests,
+automatic-check throttles, failure retry timing, badge visibility,
+HTTP Range resume validation, release dates, installation permission return,
+cancelled installer and installed-version success decisions.
+These tests validate logic, but actual device verification is still required for
+Android's installer UI, rotation during an active download, OS process termination,
+bad Wi-Fi/mobile-data transitions, and recording/casting guards.
 
 ## Rollout
 - Stage 1: extract and test mRadio's existing behaviour without regression.
@@ -119,4 +165,4 @@ versions, or release channels invalidates stale cached offers.
 - Process recreation, accessibility, dark/light and large text.
 - No automatic install during active recording or other protected operations.
 
-**Status:** shared updater implementation exists; the common badge API is available on this branch. Publish a new versioned package after the change passes CI and is merged. Existing consumers must update their dependency version and connect their navigation slots.
+**Status:** shared updater UI and reliability features are implemented. Each consuming app must update its package dependency and wire its existing navigation and lifecycle adapter to the shared API; this does not migrate host apps automatically.
