@@ -68,6 +68,7 @@ class GitHubReleaseSource(
                     apkSize = asset.optLong("size").takeIf { it > 0 },
                     sha256 = sha,
                     experimental = false,
+                    publishedAtMillis = ReleaseDateParser.parse(root.optString("published_at")),
                 )
             }
             return null
