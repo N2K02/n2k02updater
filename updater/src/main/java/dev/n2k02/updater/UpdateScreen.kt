@@ -26,6 +26,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
@@ -135,7 +136,7 @@ fun N2K02UpdatePage(
     UpdatePageContent(
         controller = controller,
         installGuard = installGuard,
-        modifier = modifier.verticalScroll(rememberScrollState()),
+        modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()),
         experimentalEnabled = experimentalEnabled,
         onExperimentalEnabledChange = onExperimentalEnabledChange,
         showHeader = showHeader,
@@ -216,21 +217,24 @@ private fun UpdatePageContent(
     }
 
     Column(
-        modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+        // Leave a reachable scroll tail below the primary action and expandable details.
+        // The host Scaffold must still apply its actual bottom-bar innerPadding.
+        modifier = modifier.fillMaxWidth().padding(
+            start = 16.dp, end = 16.dp, top = 14.dp, bottom = 48.dp,
+        ),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         if (showHeader) {
             N2K02UpdateTitle(modifier = Modifier.padding(bottom = 8.dp))
         }
 
-        // Match MRadio's branded identity, without duplicating the title or
-        // showing the installed version twice in stacked cards.
+        // The launcher icon belongs only in the About & updates page title;
+        // do not repeat it in the installed-version summary.
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier.fillMaxWidth(),
         ) {
-            N2K02AppIcon(modifier = Modifier.size(56.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     appInfo?.name ?: context.packageName,
@@ -550,7 +554,6 @@ private fun StatusPanel(status: UpdateStatus, installed: String?) {
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.SemiBold,
                             )
-                            N2K02UpdateBadge(status)
                         }
                         Text(
                             text = when (val current = status) {
