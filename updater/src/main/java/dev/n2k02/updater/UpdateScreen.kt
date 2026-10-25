@@ -135,7 +135,7 @@ fun N2K02UpdatePage(
     UpdatePageContent(
         controller = controller,
         installGuard = installGuard,
-        modifier = modifier.verticalScroll(rememberScrollState()),
+        modifier = modifier.fillMaxSize().verticalScroll(rememberScrollState()),
         experimentalEnabled = experimentalEnabled,
         onExperimentalEnabledChange = onExperimentalEnabledChange,
         showHeader = showHeader,
@@ -216,7 +216,11 @@ private fun UpdatePageContent(
     }
 
     Column(
-        modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+        // Leave a reachable scroll tail below the primary action and expandable details.
+        // The host Scaffold must still apply its actual bottom-bar innerPadding.
+        modifier = modifier.fillMaxWidth().padding(
+            start = 16.dp, end = 16.dp, top = 14.dp, bottom = 48.dp,
+        ),
         verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         if (showHeader) {
@@ -550,7 +554,6 @@ private fun StatusPanel(status: UpdateStatus, installed: String?) {
                                 style = MaterialTheme.typography.titleLarge,
                                 fontWeight = FontWeight.SemiBold,
                             )
-                            N2K02UpdateBadge(status)
                         }
                         Text(
                             text = when (val current = status) {
