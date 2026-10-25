@@ -25,6 +25,8 @@ dependencies {
     implementation(platform("androidx.compose:compose-bom:2025.04.01"))
     implementation("androidx.compose.material3:material3:1.5.0-beta01")
     implementation("androidx.compose.ui:ui")
+    implementation("androidx.compose.material:material-icons-extended")
+    implementation("androidx.compose.animation:animation")
 }
 
 afterEvaluate {
