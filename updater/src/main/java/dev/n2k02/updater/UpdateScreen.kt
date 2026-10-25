@@ -107,7 +107,7 @@ private fun displayVersion(version: String): String =
 
 private fun displayDate(timeMillis: Long): String =
     if (timeMillis <= 0L) "Not available" else
-        DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(timeMillis))
+        DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.MEDIUM).format(Date(timeMillis))
 
 private fun displaySize(bytes: Long): String {
     val mb = bytes.toDouble() / (1024 * 1024)
@@ -274,6 +274,7 @@ private fun UpdatePageContent(
                 title = "Last checked",
                 date = lastCheckedAt,
                 modifier = Modifier.weight(1f),
+                checking = status is UpdateStatus.Checking,
             )
         }
         if (lastCheckFailed) {
@@ -417,10 +418,10 @@ private fun UpdatePageContent(
 }
 
 @Composable
-private fun MetaDate(title: String, date: Long, modifier: Modifier = Modifier) {
+private fun MetaDate(title: String, date: Long, modifier: Modifier = Modifier, checking: Boolean = false) {
     Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Text(title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(displayDate(date), style = MaterialTheme.typography.bodySmall)
+        Text(if (checking) "Checking now…" else displayDate(date), style = MaterialTheme.typography.bodySmall)
     }
 }
 
