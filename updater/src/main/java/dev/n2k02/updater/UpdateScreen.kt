@@ -172,7 +172,6 @@ private fun UpdatePageContent(
 ) {
     val status by controller.status.collectAsState()
     val lastCheckedAt by controller.lastCheckedAt.collectAsState()
-    val lastSuccessfulCheckAt by controller.lastSuccessfulCheckAt.collectAsState()
     val lastCheckFailed by controller.lastCheckFailed.collectAsState()
     val context = LocalContext.current
     val activity = context.findActivity()
@@ -181,7 +180,6 @@ private fun UpdatePageContent(
     }
     var confirmLargeDownload by remember { mutableStateOf<UpdateRelease?>(null) }
     var showDiagnostics by remember { mutableStateOf(false) }
-    var expandedSection by remember { mutableStateOf<String?>(null) }
     fun downloadOrConfirm(candidate: UpdateRelease) {
         if ((candidate.apkSize ?: 0L) >= 20L * 1024 * 1024 && context.isMeteredConnection()) {
             confirmLargeDownload = candidate
@@ -273,14 +271,14 @@ private fun UpdatePageContent(
                 modifier = Modifier.weight(1f),
             )
             MetaDate(
-                title = "Last successful check",
-                date = lastSuccessfulCheckAt,
+                title = "Last checked",
+                date = lastCheckedAt,
                 modifier = Modifier.weight(1f),
             )
         }
         if (lastCheckFailed) {
             Text(
-                "Last check failed at ${displayDate(lastCheckedAt)}. You can retry.",
+                "Could not check for updates. Try again when you are connected.",
                 color = MaterialTheme.colorScheme.error,
                 style = MaterialTheme.typography.bodySmall,
             )
@@ -388,88 +386,32 @@ private fun UpdatePageContent(
             }
         }
 
-        Card(
-            modifier = Modifier.fillMaxWidth().animateContentSize(
-                animationSpec = spring(stiffness = Spring.StiffnessLow)
-            ),
-            shape = MaterialTheme.shapes.extraLarge,
-            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
-        ) {
-            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)) {
-                ExpandableDetail(
-                    title = "Version details",
-                    subtitle = release?.let { "${it.tag} available" }
-                        ?: appInfo?.let { "${displayVersion(it.versionName)} (build ${it.versionCode})" }
-                        ?: "App version",
-                    icon = Icons.Rounded.Feed,
-                    expanded = expandedSection == "version",
-                    onClick = { expandedSection = if (expandedSection == "version") null else "version" },
-                ) {
-                    DetailLine("Installed", appInfo?.let { "${displayVersion(it.versionName)} (build ${it.versionCode})" } ?: "Unavailable")
-                    DetailLine("Last installed / updated", displayDate(appInfo?.lastUpdatedAt ?: 0L))
-                    DetailLine("Last successful check", displayDate(lastSuccessfulCheckAt))
-                    if (release != null) {
-                        DetailLine("Available", "${release.tag} (build ${release.versionCode})")
-                        DetailLine("Channel", if (release.experimental) "Experimental" else "Stable")
-                        release.publishedAtMillis?.let { DetailLine("Published", displayDate(it)) }
-                        release.apkSize?.takeIf { it > 0L }?.let { DetailLine("Download", displaySize(it)) }
-                    }
+        // Show only information that changes the update decision. Installed
+        // version and dates are already visible at the top of this page.
+        if (release != null) {
+            release.apkSize?.takeIf { it > 0L }?.let { bytes ->
+                Text(
+                    "${if (release.experimental) "Experimental" else "Stable"} update · ${displaySize(bytes)}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            if (release.notes.isNotEmpty()) {
+                var showNotes by remember(release.tag) { mutableStateOf(false) }
+                TextButton(onClick = { showNotes = !showNotes }) {
+                    Text(if (showNotes) "Hide what's new" else "What's new in ${release.tag}")
                 }
-                HorizontalDivider()
-                ExpandableDetail(
-                    title = release?.let { "What's new in ${it.tag}" } ?: "What's new",
-                    subtitle = if (release?.notes?.isNotEmpty() == true) "View release notes"
-                        else "Release notes appear when an update is found",
-                    icon = Icons.Rounded.Feed,
-                    expanded = expandedSection == "notes",
-                    onClick = { expandedSection = if (expandedSection == "notes") null else "notes" },
+                AnimatedVisibility(
+                    visible = showNotes,
+                    enter = expandVertically(animationSpec = spring(stiffness = Spring.StiffnessLow)) + fadeIn(),
+                    exit = shrinkVertically() + fadeOut(),
                 ) {
                     Text(
-                        if (release?.notes?.isNotEmpty() == true)
-                            release.notes.joinToString("\n") { "• $it" }
-                        else "No new release notes are available.",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                }
-                HorizontalDivider()
-                ExpandableDetail(
-                    title = "Update security",
-                    subtitle = "Verified APK, package and developer signature",
-                    icon = Icons.Rounded.Security,
-                    expanded = expandedSection == "security",
-                    onClick = { expandedSection = if (expandedSection == "security") null else "security" },
-                ) {
-                    Text(
-                        "The entire APK is checked against its SHA-256 checksum, package identity, version and trusted signing certificate. Android always confirms the installation.",
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                }
-                HorizontalDivider()
-                ExpandableDetail(
-                    title = "Update settings",
-                    subtitle = "Auto-check and download preferences",
-                    icon = Icons.Rounded.Settings,
-                    expanded = expandedSection == "settings",
-                    onClick = { expandedSection = if (expandedSection == "settings") null else "settings" },
-                ) {
-                    Text(
-                        "Updates are checked on app foreground entry when due: every 12 hours after a successful check, or after 15 minutes following a failed check. Large downloads on mobile data require confirmation. Downloads and installation remain user controlled.",
+                        release.notes.joinToString("\n") { "• $it" },
                         style = MaterialTheme.typography.bodyMedium,
                     )
                 }
             }
-        }
-        Row(
-            verticalAlignment = Alignment.Top,
-            horizontalArrangement = Arrangement.spacedBy(10.dp),
-            modifier = Modifier.padding(horizontal = 6.dp, vertical = 8.dp),
-        ) {
-            Icon(Icons.Rounded.Info, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            Text(
-                "Updates are downloaded securely and checked before installation. Android confirms the final install.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
         }
     }
 }
@@ -587,46 +529,3 @@ private fun StatusPanel(status: UpdateStatus, installed: String?) {
     }
 }
 
-@Composable
-private fun ExpandableDetail(
-    title: String,
-    subtitle: String,
-    icon: ImageVector,
-    expanded: Boolean,
-    onClick: () -> Unit,
-    content: @Composable () -> Unit,
-) {
-    Column(modifier = Modifier.fillMaxWidth()) {
-        Row(
-            modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)
-                .padding(horizontal = 6.dp, vertical = 18.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-        ) {
-            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
-            Column(modifier = Modifier.weight(1f)) {
-                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            }
-            Icon(Icons.Rounded.ChevronRight, contentDescription = if (expanded) "Collapse" else "Expand")
-        }
-        AnimatedVisibility(
-            visible = expanded,
-            enter = expandVertically(animationSpec = spring(stiffness = Spring.StiffnessLow)) + fadeIn(),
-            exit = shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessLow)) + fadeOut(),
-        ) {
-            Column(
-                modifier = Modifier.fillMaxWidth().padding(start = 44.dp, end = 12.dp, bottom = 16.dp),
-                verticalArrangement = Arrangement.spacedBy(9.dp),
-            ) { content() }
-        }
-    }
-}
-
-@Composable
-private fun DetailLine(label: String, value: String) {
-    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(value, style = MaterialTheme.typography.bodyMedium)
-    }
-}
