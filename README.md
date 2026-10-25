@@ -91,6 +91,32 @@ N2K02UpdatePage(
 // In an existing scrollable Column, use N2K02UpdateScreen(controller, guard).
 ```
 
+
+## Compact host-owned About & updates layout
+
+Each host app supplies **one** page header and its own navigation/back behavior.
+Use `N2K02UpdateTitle()` inside the existing top app bar or page header
+instead of creating another header inside the updater. Keep the Settings
+and About & updates pages in the app's normal navigation structure.
+The shared updater page itself has no back button or host navigation bar.
+
+The compact page shows the app name/version, last installed/updated date,
+**last checked** time, experimental-release switch, update status and the
+single action button. Dynamic release notes and download information
+appear only when an actual release is available. The previous static
+Version details, What's new, Update security and Update settings menu,
+along with repeated security footer text, are removed.
+
+Every manual check records the attempt time **as the check starts**, including
+a failed network request; the time updates again when that check completes.
+The last successful check is retained independently and is not mislabeled
+as the last attempted refresh. The displayed time includes seconds.
+
+Avoid nested scrolling: use `N2K02UpdatePage` as the only scrolling child in
+a standalone page, with the host `Scaffold`'s `innerPadding`; use
+`N2K02UpdateScreen` only inside an existing scrollable Settings container.
+The host is responsible for presenting an appropriate title only once.
+
 ## Complete shared About & updates page
 
 Each app can now open **one** shared page from its existing Settings submenu.
