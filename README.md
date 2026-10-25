@@ -24,7 +24,9 @@ It shows for both stable and experimental releases in `Available`,
 `Downloading`, `Ready`, `NeedsInstallPermission`, and recoverable failed
 (download/install) states. It does not appear for `Idle`, `Checking`,
 `Current`, or failed checks without a known pending release.
-`N2K02UpdateScreen` automatically shows the badge inside its update card.
+The page intentionally does **not** draw a `New` badge: its status panel already says whether a new update is available. Host navigation is the only place the badge belongs.
+
+**Placement policy:** Put the indicator on the top-level **Settings** menu/navigation entry and its **About & updates** submenu item. Do not repeat it on the destination page, the update status/action card, or a second **Updates** navigation tab. The badge stays visible while a pending update exists, including during download and after a recoverable failure.
 
 Apps can opt into the same indicator in navigation without duplicating UI or state logic.
 The host app still decides where its Settings, submenu, and update entries appear:
@@ -160,6 +162,13 @@ versions, or release channels invalidates stale cached offers.
   the page omits the release date. GitHub release `published_at` is also supported.
 - **Channels:** skips now apply only to stable or experimental channels separately,
   while existing legacy skipped-tag values remain supported.
+- **Scrollable standalone page:** The host Scaffold must pass its `innerPadding`
+  into `N2K02UpdatePage(modifier = Modifier.padding(innerPadding))`. The page
+  fills the available viewport and scrolls itself, with additional bottom spacing
+  so Download/Install and expanded detail controls remain reachable above bottom
+  navigation and gesture areas. Do **not** place it inside another scrollable
+  Column or LazyColumn. When the host already owns vertical scrolling, use
+  `N2K02UpdateScreen` instead.
 - **Navigation:** `N2K02UpdatePage` hides its own header by default, avoiding
   a duplicate title when the host supplies a Settings top bar. Set
   `showHeader = true` for a full-screen page without an app-level title.
