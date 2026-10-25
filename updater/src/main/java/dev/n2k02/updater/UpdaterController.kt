@@ -112,6 +112,12 @@ class UpdaterController(
 
         operation?.cancel()
         operation = scope.launch {
+            // Record the attempted check as soon as it starts. This drives the
+            // user-visible "Last checked" time even if an offline check fails
+            // or a previously offered release stays on screen.
+            val startedAt = System.currentTimeMillis()
+            offerPreferences?.edit()?.putLong("lastCheck", startedAt)?.apply()
+            mutableLastCheckedAt.value = startedAt
             val previous = mutableStatus.value
             val previousOffer = when (previous) {
                 is UpdateStatus.Available -> previous.release
