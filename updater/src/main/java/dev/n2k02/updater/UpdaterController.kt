@@ -112,6 +112,14 @@ class UpdaterController(
 
         operation?.cancel()
         operation = scope.launch {
+            // Record the attempted check as soon as it starts. This drives the
+            // user-visible "Last checked" time even if an offline check fails
+            // or a previously offered release stays on screen.
+            val started = UpdateCheckTimes(
+                mutableLastCheckedAt.value, mutableLastSuccessfulCheckAt.value
+            ).begin(System.currentTimeMillis())
+            offerPreferences?.edit()?.putLong("lastCheck", started.attemptedAt)?.apply()
+            mutableLastCheckedAt.value = started.attemptedAt
             val previous = mutableStatus.value
             val previousOffer = when (previous) {
                 is UpdateStatus.Available -> previous.release
@@ -132,14 +140,14 @@ class UpdaterController(
                     )
                 }
                 if (offered == null) offerCache.clear() else offerCache.save(offered)
-                val time = System.currentTimeMillis()
+                val completed = started.succeeded(System.currentTimeMillis())
                 offerPreferences?.edit()
-                    ?.putLong("lastCheck", time)
-                    ?.putLong("lastSuccessfulCheck", time)
+                    ?.putLong("lastCheck", completed.attemptedAt)
+                    ?.putLong("lastSuccessfulCheck", completed.succeededAt)
                     ?.putBoolean("lastCheckFailed", false)
                     ?.apply()
-                mutableLastCheckedAt.value = time
-                mutableLastSuccessfulCheckAt.value = time
+                mutableLastCheckedAt.value = completed.attemptedAt
+                mutableLastSuccessfulCheckAt.value = completed.succeededAt
                 mutableLastCheckFailed.value = false
                 mutableStatus.value = when {
                     offered != null -> UpdateStatus.Available(offered)
@@ -149,10 +157,10 @@ class UpdaterController(
             } catch (cancel: CancellationException) {
                 throw cancel
             } catch (error: Exception) {
-                val time = System.currentTimeMillis()
-                offerPreferences?.edit()?.putLong("lastCheck", time)
+                val failed = started.failed(System.currentTimeMillis())
+                offerPreferences?.edit()?.putLong("lastCheck", failed.attemptedAt)
                     ?.putBoolean("lastCheckFailed", true)?.apply()
-                mutableLastCheckedAt.value = time
+                mutableLastCheckedAt.value = failed.attemptedAt
                 mutableLastCheckFailed.value = true
                 // On a temporary network error, never erase an existing known release.
                 mutableStatus.value = when {
