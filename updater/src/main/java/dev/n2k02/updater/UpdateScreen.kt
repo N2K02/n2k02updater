@@ -228,14 +228,13 @@ private fun UpdatePageContent(
             N2K02UpdateTitle(modifier = Modifier.padding(bottom = 8.dp))
         }
 
-        // Match MRadio's branded identity, without duplicating the title or
-        // showing the installed version twice in stacked cards.
+        // The launcher icon belongs only in the About & updates page title;
+        // do not repeat it in the installed-version summary.
         Row(
             verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            horizontalArrangement = Arrangement.spacedBy(12.dp),
             modifier = Modifier.fillMaxWidth(),
         ) {
-            N2K02AppIcon(modifier = Modifier.size(56.dp))
             Column(modifier = Modifier.weight(1f)) {
                 Text(
                     appInfo?.name ?: context.packageName,
