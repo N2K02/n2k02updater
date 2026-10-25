@@ -148,8 +148,16 @@ fun N2K02UpdateScreen(
     controller: UpdaterController,
     installGuard: UpdateInstallGuard,
     modifier: Modifier = Modifier,
+    experimentalEnabled: Boolean? = null,
+    onExperimentalEnabledChange: ((Boolean) -> Unit)? = null,
 ) {
-    UpdatePageContent(controller = controller, installGuard = installGuard, modifier = modifier)
+    UpdatePageContent(
+        controller = controller,
+        installGuard = installGuard,
+        modifier = modifier,
+        experimentalEnabled = experimentalEnabled,
+        onExperimentalEnabledChange = onExperimentalEnabledChange,
+    )
 }
 
 @Composable
