@@ -7,21 +7,55 @@ import android.content.Context
 import android.content.ContextWrapper
 import android.net.ConnectivityManager
 import android.os.Build
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.animation.animateContentSize
+import androidx.compose.animation.expandVertically
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.shrinkVertically
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.Spring
+import androidx.compose.animation.animateColorAsState
+import androidx.compose.animation.core.spring
+import androidx.compose.animation.core.tween
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.rounded.CalendarMonth
+import androidx.compose.material.icons.rounded.CheckCircle
+import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.Download
+import androidx.compose.material.icons.rounded.ErrorOutline
+import androidx.compose.material.icons.rounded.FactCheck
+import androidx.compose.material.icons.rounded.Feed
+import androidx.compose.material.icons.rounded.Info
+import androidx.compose.material.icons.rounded.Refresh
+import androidx.compose.material.icons.rounded.Security
+import androidx.compose.material.icons.rounded.Settings
+import androidx.compose.material.icons.rounded.SystemUpdate
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.Card
+import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LoadingIndicator
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
@@ -32,7 +66,9 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
@@ -47,7 +83,7 @@ private tailrec fun Context.findActivity(): Activity? = when (this) {
 }
 
 private data class InstalledAppInfo(
-    val appName: String,
+    val name: String,
     val versionName: String,
     val versionCode: Long,
     val lastUpdatedAt: Long,
@@ -58,7 +94,7 @@ private fun Context.installedAppInfo(): InstalledAppInfo {
     val info = packageManager.getPackageInfo(packageName, 0)
     val code = if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong()
     return InstalledAppInfo(
-        appName = packageManager.getApplicationLabel(applicationInfo).toString(),
+        name = packageManager.getApplicationLabel(applicationInfo).toString(),
         versionName = info.versionName ?: "Unknown",
         versionCode = code,
         lastUpdatedAt = info.lastUpdateTime,
@@ -68,20 +104,24 @@ private fun Context.installedAppInfo(): InstalledAppInfo {
 private fun displayVersion(version: String): String =
     if (version.startsWith("v", ignoreCase = true)) version else "v$version"
 
-/** Never make a metered network warning mandatory if the host denies status access. */
+private fun displayDate(timeMillis: Long): String =
+    if (timeMillis <= 0L) "Not available" else
+        DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT).format(Date(timeMillis))
+
+private fun displaySize(bytes: Long): String {
+    val mb = bytes.toDouble() / (1024 * 1024)
+    return if (mb >= 1) String.format(java.util.Locale.getDefault(), "%.1f MB", mb)
+    else "${bytes / 1024} KB"
+}
+
 private fun Context.isMeteredConnection(): Boolean = runCatching {
     getSystemService(ConnectivityManager::class.java)?.isActiveNetworkMetered ?: false
 }.getOrDefault(false)
 
-private fun displayDate(timeMillis: Long): String =
-    if (timeMillis <= 0L) "Not available"
-    else DateFormat.getDateTimeInstance(DateFormat.MEDIUM, DateFormat.SHORT)
-        .format(Date(timeMillis))
-
 /**
- * Complete, scrollable About & updates page. Put it in any app's Settings submenu
- * and keep the host's own top-bar Back button, theme, and install-safety guard.
- * The experimental switch appears only when a host supplies both arguments.
+ * One complete, vertically scrollable Material 3 Expressive update page.
+ * The host owns the navigation bar and its back action. If a host already
+ * supplies "About & updates", leave showHeader=false (the default).
  */
 @Composable
 fun N2K02UpdatePage(
@@ -102,17 +142,22 @@ fun N2K02UpdatePage(
     )
 }
 
-/**
- * Backwards-compatible embeddable content for apps that already provide scrolling.
- * New dedicated settings pages should prefer N2K02UpdatePage.
- */
+/** For host pages that already own their vertical scroll (no nested scroll). */
 @Composable
 fun N2K02UpdateScreen(
     controller: UpdaterController,
     installGuard: UpdateInstallGuard,
     modifier: Modifier = Modifier,
+    experimentalEnabled: Boolean? = null,
+    onExperimentalEnabledChange: ((Boolean) -> Unit)? = null,
 ) {
-    UpdatePageContent(controller, installGuard, modifier)
+    UpdatePageContent(
+        controller = controller,
+        installGuard = installGuard,
+        modifier = modifier,
+        experimentalEnabled = experimentalEnabled,
+        onExperimentalEnabledChange = onExperimentalEnabledChange,
+    )
 }
 
 @Composable
@@ -122,7 +167,7 @@ private fun UpdatePageContent(
     modifier: Modifier = Modifier,
     experimentalEnabled: Boolean? = null,
     onExperimentalEnabledChange: ((Boolean) -> Unit)? = null,
-    showHeader: Boolean = true,
+    showHeader: Boolean = false,
 ) {
     val status by controller.status.collectAsState()
     val lastCheckedAt by controller.lastCheckedAt.collectAsState()
@@ -130,27 +175,28 @@ private fun UpdatePageContent(
     val lastCheckFailed by controller.lastCheckFailed.collectAsState()
     val context = LocalContext.current
     val activity = context.findActivity()
-    val appInfo = remember(context.packageName) { runCatching { context.installedAppInfo() }.getOrNull() }
-    var showDiagnostics by remember { mutableStateOf(false) }
+    val appInfo = remember(context.packageName) {
+        runCatching { context.installedAppInfo() }.getOrNull()
+    }
     var confirmLargeDownload by remember { mutableStateOf<UpdateRelease?>(null) }
-    fun downloadOrConfirm(release: UpdateRelease) {
-        if ((release.apkSize ?: 0L) >= 20L * 1024 * 1024 && context.isMeteredConnection()) {
-            confirmLargeDownload = release
+    var showDiagnostics by remember { mutableStateOf(false) }
+    var expandedSection by remember { mutableStateOf<String?>(null) }
+    fun downloadOrConfirm(candidate: UpdateRelease) {
+        if ((candidate.apkSize ?: 0L) >= 20L * 1024 * 1024 && context.isMeteredConnection()) {
+            confirmLargeDownload = candidate
         } else {
-            controller.download(release)
+            controller.download(candidate)
         }
     }
-
-    // An app can stay open for days. Recheck whenever the page is entered
-    // (respecting the shared throttle), even if the previous result was Current.
+    // Recheck on entering the page regardless of whether last state was Current.
     LaunchedEffect(controller) { controller.refreshIfDue() }
 
-    val release = when (val state = status) {
-        is UpdateStatus.Available -> state.release
-        is UpdateStatus.Downloading -> state.release
-        is UpdateStatus.Ready -> state.release
-        is UpdateStatus.NeedsInstallPermission -> state.release
-        is UpdateStatus.Failed -> state.release
+    val release = when (val current = status) {
+        is UpdateStatus.Available -> current.release
+        is UpdateStatus.Downloading -> current.release
+        is UpdateStatus.Ready -> current.release
+        is UpdateStatus.NeedsInstallPermission -> current.release
+        is UpdateStatus.Failed -> current.release
         else -> null
     }
 
@@ -165,221 +211,419 @@ private fun UpdatePageContent(
                     controller.download(candidate)
                 }) { Text("Download") }
             },
-            dismissButton = {
-                TextButton(onClick = { confirmLargeDownload = null }) { Text("Cancel") }
-            },
+            dismissButton = { TextButton(onClick = { confirmLargeDownload = null }) { Text("Cancel") } },
         )
     }
 
     Column(
-        modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 12.dp),
-        verticalArrangement = Arrangement.spacedBy(14.dp),
+        modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 14.dp),
+        verticalArrangement = Arrangement.spacedBy(18.dp),
     ) {
         if (showHeader) {
-            Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                Text("About & updates", style = MaterialTheme.typography.headlineMedium)
-                N2K02UpdateBadge(status)
+            N2K02UpdateTitle(modifier = Modifier.padding(bottom = 8.dp))
+        }
+
+        // Match MRadio's branded identity, without duplicating the title or
+        // showing the installed version twice in stacked cards.
+        Row(
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            N2K02AppIcon(modifier = Modifier.size(56.dp))
+            Column(modifier = Modifier.weight(1f)) {
+                Text(
+                    appInfo?.name ?: context.packageName,
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis,
+                )
+                Text(
+                    appInfo?.let { "${displayVersion(it.versionName)} (build ${it.versionCode})" }
+                        ?: "Version unavailable",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+            }
+            Surface(
+                color = MaterialTheme.colorScheme.secondaryContainer,
+                contentColor = MaterialTheme.colorScheme.onSecondaryContainer,
+                shape = RoundedCornerShape(50),
+            ) {
+                Text(
+                    "Installed",
+                    style = MaterialTheme.typography.labelMedium,
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                )
             }
         }
 
-        Card(modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large) {
-            Column(
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(8.dp),
-            ) {
-                Text("Installed app", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                DetailLine("App", appInfo?.appName ?: context.packageName)
-                DetailLine("Installed version", appInfo?.let { "${displayVersion(it.versionName)} (build ${it.versionCode})" } ?: "Unavailable")
-                DetailLine("Last installed / updated", appInfo?.let { displayDate(it.lastUpdatedAt) } ?: "Unavailable")
-                HorizontalDivider()
-                DetailLine("Last successful check", displayDate(lastSuccessfulCheckAt))
-                if (lastCheckFailed) {
-                    DetailLine("Last check attempt", "${displayDate(lastCheckedAt)} · Could not connect")
-                }
-                DetailLine("Available version", release?.let { "${it.tag} (build ${it.versionCode})" }
-                    ?: when (status) {
-                        UpdateStatus.Current -> "You're up to date"
-                        UpdateStatus.Checking -> "Checking…"
-                        else -> "No pending update"
-                    })
-                if (release != null) {
-                    DetailLine("Release channel", if (release.experimental) "Experimental" else "Stable")
-                    release.publishedAtMillis?.let {
-                        DetailLine("Release published", displayDate(it))
-                    }
-                    release.apkSize?.takeIf { it > 0L }?.let {
-                        DetailLine("Download size", displaySize(it))
-                    }
-                }
-            }
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(18.dp),
+            modifier = Modifier.fillMaxWidth(),
+        ) {
+            MetaDate(
+                title = "Last updated",
+                date = appInfo?.lastUpdatedAt ?: 0L,
+                modifier = Modifier.weight(1f),
+            )
+            MetaDate(
+                title = "Last successful check",
+                date = lastSuccessfulCheckAt,
+                modifier = Modifier.weight(1f),
+            )
+        }
+        if (lastCheckFailed) {
+            Text(
+                "Last check failed at ${displayDate(lastCheckedAt)}. You can retry.",
+                color = MaterialTheme.colorScheme.error,
+                style = MaterialTheme.typography.bodySmall,
+            )
         }
 
         if (experimentalEnabled != null && onExperimentalEnabledChange != null) {
-            Card(modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large) {
-                Row(
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
-                    horizontalArrangement = Arrangement.SpaceBetween,
-                ) {
-                    Column(modifier = Modifier.weight(1f).padding(end = 12.dp)) {
-                        Text("Experimental updates", style = MaterialTheme.typography.titleMedium)
-                        Text(
-                            "Include test builds as well as stable releases. Test builds may contain bugs.",
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                    Switch(
-                        checked = experimentalEnabled,
-                        onCheckedChange = onExperimentalEnabledChange,
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(12.dp),
+                modifier = Modifier.fillMaxWidth(),
+            ) {
+                Icon(Icons.Rounded.FactCheck, contentDescription = null, tint = MaterialTheme.colorScheme.primary)
+                Column(modifier = Modifier.weight(1f)) {
+                    Text("Experimental updates", style = MaterialTheme.typography.titleMedium)
+                    Text(
+                        "Include signed preview builds. Test versions may have bugs.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
+                }
+                Switch(checked = experimentalEnabled, onCheckedChange = onExperimentalEnabledChange)
+            }
+        }
+        HorizontalDivider()
+
+        StatusPanel(status = status, installed = appInfo?.versionName)
+
+        // One prominent primary action. The status panel owns context and
+        // progress; we do not repeat status in a second nested action card.
+        when (val current = status) {
+            is UpdateStatus.Downloading -> {
+                TextButton(
+                    modifier = Modifier.fillMaxWidth(),
+                    onClick = controller::cancel,
+                ) { Text("Cancel download") }
+            }
+            else -> {
+                Button(
+                    modifier = Modifier.fillMaxWidth(),
+                    shape = MaterialTheme.shapes.extraLarge,
+                    enabled = current !is UpdateStatus.Checking &&
+                        (activity != null || current !is UpdateStatus.Ready &&
+                            current !is UpdateStatus.NeedsInstallPermission &&
+                            !(current is UpdateStatus.Failed && current.retryAction == UpdateRetryAction.INSTALL)),
+                    onClick = {
+                        when (current) {
+                            UpdateStatus.Idle, UpdateStatus.Current, is UpdateStatus.Failed -> {
+                                when (current) {
+                                    is UpdateStatus.Failed -> when (current.retryAction) {
+                                        UpdateRetryAction.DOWNLOAD -> current.release?.let(::downloadOrConfirm)
+                                            ?: controller.check(manual = true)
+                                        UpdateRetryAction.INSTALL -> activity?.let { controller.install(it, installGuard) }
+                                        UpdateRetryAction.CHECK -> controller.check(manual = true)
+                                    }
+                                    else -> controller.check(manual = true)
+                                }
+                            }
+                            is UpdateStatus.Available -> downloadOrConfirm(current.release)
+                            is UpdateStatus.Ready -> activity?.let { controller.install(it, installGuard) }
+                            is UpdateStatus.NeedsInstallPermission -> activity?.let(controller::openInstallPermission)
+                            else -> Unit
+                        }
+                    },
+                ) {
+                    Icon(
+                        if (current is UpdateStatus.Available) Icons.Rounded.Download
+                        else if (current is UpdateStatus.Ready) Icons.Rounded.SystemUpdate
+                        else Icons.Rounded.Refresh,
+                        contentDescription = null,
+                    )
+                    Spacer(Modifier.size(8.dp))
+                    Text(current.primaryActionLabel())
                 }
             }
         }
 
-        Card(modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large) {
-            Column(
-                modifier = Modifier.fillMaxWidth().padding(16.dp),
-                verticalArrangement = Arrangement.spacedBy(12.dp),
-            ) {
-                Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-                    Text("Update status", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    N2K02UpdateBadge(status)
-                }
+        AnimatedVisibility(
+            visible = status is UpdateStatus.Available ||
+                status is UpdateStatus.NeedsInstallPermission ||
+                (status is UpdateStatus.Failed && (status as UpdateStatus.Failed).diagnostics != null),
+            enter = expandVertically(animationSpec = spring(stiffness = Spring.StiffnessLow)) + fadeIn(),
+            exit = shrinkVertically() + fadeOut(),
+        ) {
+            Column(Modifier.fillMaxWidth()) {
                 when (val current = status) {
-                    UpdateStatus.Idle -> Text("Check for an available update.")
-                    UpdateStatus.Checking -> Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                        LoadingIndicator()
-                        Text("Checking for updates…")
+                    is UpdateStatus.Available -> TextButton(onClick = { controller.skip(current.release) }) {
+                        Text("Skip this version")
                     }
-                    UpdateStatus.Current -> Text("You're up to date.")
-                    is UpdateStatus.Available -> {
-                        Text(
-                            if (current.release.experimental)
-                                "Experimental build ${current.release.tag} is available."
-                            else "Update ${current.release.tag} is available.",
-                        )
-                        Button(
-                            modifier = Modifier.fillMaxWidth(),
-                            onClick = { downloadOrConfirm(current.release) },
-                        ) { Text("Download update") }
-                        TextButton(onClick = { controller.skip(current.release) }) {
-                            Text("Skip this version")
-                        }
-                    }
-                    is UpdateStatus.Downloading -> {
-                        Text("Downloading and verifying ${current.release.tag}…")
-                        val progress = current.progress
-                        if (progress == null) LinearProgressIndicator(Modifier.fillMaxWidth())
-                        else {
-                            LinearProgressIndicator(
-                                progress = { progress.coerceIn(0f, 1f) },
-                                modifier = Modifier.fillMaxWidth(),
-                            )
-                            Text("${(progress.coerceIn(0f, 1f) * 100).toInt()}%")
-                        }
-                        TextButton(onClick = controller::cancel) { Text("Cancel download") }
-                    }
-                    is UpdateStatus.Ready -> {
-                        Text(current.notice ?: "Verified update ${current.release.tag} is ready to install.")
-                        Button(
-                            modifier = Modifier.fillMaxWidth(),
-                            enabled = activity != null,
-                            onClick = { activity?.let { controller.install(it, installGuard) } },
-                        ) { Text("Install update") }
-                    }
-                    is UpdateStatus.NeedsInstallPermission -> {
-                        Text("Allow this app to install updates in Android settings.")
-                        Button(
-                            enabled = activity != null,
-                            onClick = { activity?.let(controller::openInstallPermission) },
-                        ) { Text("Open install permission") }
-                        TextButton(
-                            enabled = activity != null,
-                            onClick = { activity?.let { controller.install(it, installGuard) } },
-                        ) { Text("Try installation again") }
-                    }
+                    is UpdateStatus.NeedsInstallPermission -> TextButton(
+                        onClick = { activity?.let { controller.install(it, installGuard) } },
+                        enabled = activity != null,
+                    ) { Text("Try installation again") }
                     is UpdateStatus.Failed -> {
-                        Text(current.message, color = MaterialTheme.colorScheme.error)
-                        current.release?.let { failedRelease ->
-                            when (current.retryAction) {
-                                UpdateRetryAction.DOWNLOAD -> Button(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    onClick = { downloadOrConfirm(failedRelease) },
-                                ) { Text("Retry download") }
-                                UpdateRetryAction.INSTALL -> Button(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    enabled = activity != null,
-                                    onClick = { activity?.let { controller.install(it, installGuard) } },
-                                ) { Text("Retry installation") }
-                                UpdateRetryAction.CHECK -> Unit
-                            }
-                        }
                         if (!current.diagnostics.isNullOrBlank()) {
                             TextButton(onClick = { showDiagnostics = !showDiagnostics }) {
                                 Text(if (showDiagnostics) "Hide error details" else "Show error details")
                             }
-                            if (showDiagnostics) {
-                                Text(
-                                    current.diagnostics.orEmpty(),
-                                    style = MaterialTheme.typography.bodySmall,
-                                )
+                            AnimatedVisibility(visible = showDiagnostics) {
+                                Text(current.diagnostics.orEmpty(), style = MaterialTheme.typography.bodySmall)
                             }
                         }
                     }
-                }
-                if (status !is UpdateStatus.Checking &&
-                    status !is UpdateStatus.Downloading &&
-                    status !is UpdateStatus.Ready &&
-                    status !is UpdateStatus.NeedsInstallPermission &&
-                    !(status is UpdateStatus.Failed && (status as UpdateStatus.Failed).release != null)) {
-                    FilledTonalButton(
-                        modifier = Modifier.fillMaxWidth(),
-                        onClick = { controller.check(manual = true) },
-                    ) { Text("Check again") }
+                    else -> Unit
                 }
             }
         }
 
-        if (release?.notes?.isNotEmpty() == true) {
-            Card(modifier = Modifier.fillMaxWidth(), shape = MaterialTheme.shapes.large) {
-                Column(
-                    modifier = Modifier.fillMaxWidth().padding(16.dp),
-                    verticalArrangement = Arrangement.spacedBy(8.dp),
+        Card(
+            modifier = Modifier.fillMaxWidth().animateContentSize(
+                animationSpec = spring(stiffness = Spring.StiffnessLow)
+            ),
+            shape = MaterialTheme.shapes.extraLarge,
+            colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceContainer),
+        ) {
+            Column(modifier = Modifier.padding(horizontal = 14.dp, vertical = 6.dp)) {
+                ExpandableDetail(
+                    title = "Version details",
+                    subtitle = release?.let { "${it.tag} available" }
+                        ?: appInfo?.let { "${displayVersion(it.versionName)} (build ${it.versionCode})" }
+                        ?: "App version",
+                    icon = Icons.Rounded.Feed,
+                    expanded = expandedSection == "version",
+                    onClick = { expandedSection = if (expandedSection == "version") null else "version" },
                 ) {
-                    Text("What's new", style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
-                    var expanded by remember(release.tag) { mutableStateOf(false) }
-                    var overflowed by remember(release.tag) { mutableStateOf(false) }
+                    DetailLine("Installed", appInfo?.let { "${displayVersion(it.versionName)} (build ${it.versionCode})" } ?: "Unavailable")
+                    DetailLine("Last installed / updated", displayDate(appInfo?.lastUpdatedAt ?: 0L))
+                    DetailLine("Last successful check", displayDate(lastSuccessfulCheckAt))
+                    if (release != null) {
+                        DetailLine("Available", "${release.tag} (build ${release.versionCode})")
+                        DetailLine("Channel", if (release.experimental) "Experimental" else "Stable")
+                        release.publishedAtMillis?.let { DetailLine("Published", displayDate(it)) }
+                        release.apkSize?.takeIf { it > 0L }?.let { DetailLine("Download", displaySize(it)) }
+                    }
+                }
+                HorizontalDivider()
+                ExpandableDetail(
+                    title = release?.let { "What's new in ${it.tag}" } ?: "What's new",
+                    subtitle = if (release?.notes?.isNotEmpty() == true) "View release notes"
+                        else "Release notes appear when an update is found",
+                    icon = Icons.Rounded.Feed,
+                    expanded = expandedSection == "notes",
+                    onClick = { expandedSection = if (expandedSection == "notes") null else "notes" },
+                ) {
                     Text(
-                        release.notes.joinToString("\n") { "• $it" },
+                        if (release?.notes?.isNotEmpty() == true)
+                            release.notes.joinToString("\n") { "• $it" }
+                        else "No new release notes are available.",
                         style = MaterialTheme.typography.bodyMedium,
-                        maxLines = if (expanded) Int.MAX_VALUE else 8,
-                        overflow = TextOverflow.Ellipsis,
-                        onTextLayout = { if (!expanded) overflowed = it.hasVisualOverflow },
                     )
-                    if (overflowed || expanded) TextButton(onClick = { expanded = !expanded }) {
-                        Text(if (expanded) "Show less" else "Show more")
+                }
+                HorizontalDivider()
+                ExpandableDetail(
+                    title = "Update security",
+                    subtitle = "Verified APK, package and developer signature",
+                    icon = Icons.Rounded.Security,
+                    expanded = expandedSection == "security",
+                    onClick = { expandedSection = if (expandedSection == "security") null else "security" },
+                ) {
+                    Text(
+                        "The entire APK is checked against its SHA-256 checksum, package identity, version and trusted signing certificate. Android always confirms the installation.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+                HorizontalDivider()
+                ExpandableDetail(
+                    title = "Update settings",
+                    subtitle = "Auto-check and download preferences",
+                    icon = Icons.Rounded.Settings,
+                    expanded = expandedSection == "settings",
+                    onClick = { expandedSection = if (expandedSection == "settings") null else "settings" },
+                ) {
+                    Text(
+                        "Updates are checked on app foreground entry when due: every 12 hours after a successful check, or after 15 minutes following a failed check. Large downloads on mobile data require confirmation. Downloads and installation remain user controlled.",
+                        style = MaterialTheme.typography.bodyMedium,
+                    )
+                }
+            }
+        }
+        Row(
+            verticalAlignment = Alignment.Top,
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.padding(horizontal = 6.dp, vertical = 8.dp),
+        ) {
+            Icon(Icons.Rounded.Info, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Text(
+                "Updates are downloaded securely and checked before installation. Android confirms the final install.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+    }
+}
+
+@Composable
+private fun MetaDate(title: String, date: Long, modifier: Modifier = Modifier) {
+    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        Text(title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(displayDate(date), style = MaterialTheme.typography.bodySmall)
+    }
+}
+
+@Composable
+private fun StatusPanel(status: UpdateStatus, installed: String?) {
+    val background by animateColorAsState(
+        targetValue = when (status.pagePhase()) {
+            UpdatePagePhase.CURRENT -> MaterialTheme.colorScheme.tertiaryContainer
+            UpdatePagePhase.AVAILABLE, UpdatePagePhase.READY -> MaterialTheme.colorScheme.primaryContainer
+            UpdatePagePhase.FAILED, UpdatePagePhase.PERMISSION -> MaterialTheme.colorScheme.errorContainer
+            else -> MaterialTheme.colorScheme.surfaceContainerHigh
+        },
+        animationSpec = tween(durationMillis = 270),
+        label = "Update panel background",
+    )
+    val foreground = when (status.pagePhase()) {
+        UpdatePagePhase.CURRENT -> MaterialTheme.colorScheme.onTertiaryContainer
+        UpdatePagePhase.AVAILABLE, UpdatePagePhase.READY -> MaterialTheme.colorScheme.onPrimaryContainer
+        UpdatePagePhase.FAILED, UpdatePagePhase.PERMISSION -> MaterialTheme.colorScheme.onErrorContainer
+        else -> MaterialTheme.colorScheme.onSurface
+    }
+    Surface(
+        shape = MaterialTheme.shapes.extraLarge,
+        color = background,
+        contentColor = foreground,
+        modifier = Modifier.fillMaxWidth().animateContentSize(
+            animationSpec = spring(stiffness = Spring.StiffnessLow),
+        ),
+    ) {
+        AnimatedContent(
+            targetState = status.pagePhase(),
+            label = "Update stage",
+            transitionSpec = {
+                (fadeIn(tween(220)) + slideInVertically(tween(220)) { it / 8 })
+                    .togetherWith(fadeOut(tween(140)))
+            },
+        ) { phase ->
+            Column(modifier = Modifier.fillMaxWidth().padding(20.dp)) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp),
+                ) {
+                    if (phase == UpdatePagePhase.CHECKING || phase == UpdatePagePhase.DOWNLOADING) {
+                        LoadingIndicator(modifier = Modifier.size(44.dp))
+                    } else {
+                        Icon(
+                            imageVector = when (phase) {
+                                UpdatePagePhase.CURRENT -> Icons.Rounded.CheckCircle
+                                UpdatePagePhase.AVAILABLE, UpdatePagePhase.READY -> Icons.Rounded.SystemUpdate
+                                UpdatePagePhase.FAILED, UpdatePagePhase.PERMISSION -> Icons.Rounded.ErrorOutline
+                                else -> Icons.Rounded.Refresh
+                            },
+                            contentDescription = null,
+                            modifier = Modifier.size(44.dp),
+                        )
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        ) {
+                            Text(
+                                text = when (phase) {
+                                    UpdatePagePhase.IDLE -> "Check for updates"
+                                    UpdatePagePhase.CHECKING -> "Checking for updates"
+                                    UpdatePagePhase.CURRENT -> "You're up to date"
+                                    UpdatePagePhase.AVAILABLE -> "New update available"
+                                    UpdatePagePhase.DOWNLOADING -> "Downloading update"
+                                    UpdatePagePhase.READY -> "Ready to install"
+                                    UpdatePagePhase.PERMISSION -> "Installation permission needed"
+                                    UpdatePagePhase.FAILED -> "Update needs attention"
+                                },
+                                style = MaterialTheme.typography.titleLarge,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            N2K02UpdateBadge(status)
+                        }
+                        Text(
+                            text = when (val current = status) {
+                                UpdateStatus.Idle -> "Check whether a newer release is available."
+                                UpdateStatus.Checking -> "Contacting the update source…"
+                                UpdateStatus.Current -> "You have the latest version${installed?.let { " (${displayVersion(it)})" } ?: ""}."
+                                is UpdateStatus.Available -> "${current.release.tag} is available for download."
+                                is UpdateStatus.Downloading -> "Downloading and verifying ${current.release.tag}."
+                                is UpdateStatus.Ready -> current.notice ?: "${current.release.tag} has been verified."
+                                is UpdateStatus.NeedsInstallPermission -> "Allow this app to install updates in Android settings."
+                                is UpdateStatus.Failed -> current.message
+                            },
+                            style = MaterialTheme.typography.bodyMedium,
+                        )
+                    }
+                }
+                if (phase == UpdatePagePhase.DOWNLOADING) {
+                    val progress = (status as? UpdateStatus.Downloading)?.progress
+                    Spacer(Modifier.size(14.dp))
+                    if (progress == null) LinearProgressIndicator(modifier = Modifier.fillMaxWidth())
+                    else {
+                        LinearProgressIndicator(
+                            progress = { progress.coerceIn(0f, 1f) },
+                            modifier = Modifier.fillMaxWidth(),
+                        )
+                        Text("${(progress.coerceIn(0f, 1f) * 100).toInt()}%", style = MaterialTheme.typography.labelMedium)
                     }
                 }
             }
         }
-        Text(
-            "Updates are downloaded securely and checked for APK identity, version, and signing certificate before installation. Android confirms the final install.",
-            style = MaterialTheme.typography.bodySmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant,
-        )
+    }
+}
+
+@Composable
+private fun ExpandableDetail(
+    title: String,
+    subtitle: String,
+    icon: ImageVector,
+    expanded: Boolean,
+    onClick: () -> Unit,
+    content: @Composable () -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth()) {
+        Row(
+            modifier = Modifier.fillMaxWidth().clickable(onClick = onClick)
+                .padding(horizontal = 6.dp, vertical = 18.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+        ) {
+            Icon(icon, contentDescription = null, tint = MaterialTheme.colorScheme.onSurfaceVariant)
+            Column(modifier = Modifier.weight(1f)) {
+                Text(title, style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+                Text(subtitle, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Icon(Icons.Rounded.ChevronRight, contentDescription = if (expanded) "Collapse" else "Expand")
+        }
+        AnimatedVisibility(
+            visible = expanded,
+            enter = expandVertically(animationSpec = spring(stiffness = Spring.StiffnessLow)) + fadeIn(),
+            exit = shrinkVertically(animationSpec = spring(stiffness = Spring.StiffnessLow)) + fadeOut(),
+        ) {
+            Column(
+                modifier = Modifier.fillMaxWidth().padding(start = 44.dp, end = 12.dp, bottom = 16.dp),
+                verticalArrangement = Arrangement.spacedBy(9.dp),
+            ) { content() }
+        }
     }
 }
 
 @Composable
 private fun DetailLine(label: String, value: String) {
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-        Text(label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+        Text(label, style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
         Text(value, style = MaterialTheme.typography.bodyMedium)
     }
-}
-
-private fun displaySize(bytes: Long): String {
-    val mb = bytes.toDouble() / (1024 * 1024)
-    return if (mb >= 1) String.format(java.util.Locale.getDefault(), "%.1f MB", mb)
-    else "${bytes / 1024} KB"
 }

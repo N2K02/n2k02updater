@@ -57,6 +57,38 @@ submenu slots to these shared components. Update badges remain visible until the
 pending-update state clears; simply opening the update page does not clear them.
 
 
+
+## Expressive single-page layout (app icon + animated update states)
+
+The shared update screen now follows the compact MRadio/NetSpeed design:
+- The host's **About & updates** title appears once. Put `N2K02UpdateTitle()`
+  in your `TopAppBar.title` to show the **actual installed app launcher icon**
+  beside it. The full page may set `showHeader = true` when no host title exists.
+- The page starts with the app icon, name, version/build, Installed chip, last
+  installed/updated date and last successful check. The experimental toggle
+  follows immediately when a host supplies it.
+- A single large, animated status panel replaces the old duplicated status
+  and installed-app cards. One primary action changes between Check again,
+  Download, Install, Permission, Retry and Cancel (download).
+- Details are expandable: installed/available versions and release date;
+  What's new; verification and signer security; check cadence and mobile-data
+  behavior. Expanding them uses a spring-size transition, while update states
+  use a fade-and-slide transition with animated container color.
+- Back navigation and bottom navigation stay **host-owned**. No new settings
+  switches or automatic-install behavior are invented.
+
+```kotlin
+TopAppBar(title = { N2K02UpdateTitle() }, navigationIcon = { /* host back */ })
+// Below the host top bar, with no duplicate title:
+N2K02UpdatePage(
+    controller = LiveUpdater.controller,
+    installGuard = LiveUpdater.installGuard,
+    experimentalEnabled = experimental,
+    onExperimentalEnabledChange = LiveUpdater::setExperimentalEnabled,
+)
+// In an existing scrollable Column, use N2K02UpdateScreen(controller, guard).
+```
+
 ## Complete shared About & updates page
 
 Each app can now open **one** shared page from its existing Settings submenu.
