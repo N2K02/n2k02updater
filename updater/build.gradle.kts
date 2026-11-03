@@ -18,12 +18,12 @@ android {
 }
 
 dependencies {
-    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.9.0")
-    implementation("androidx.core:core:1.16.0")
+    implementation("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.11.0")
+    implementation("androidx.core:core:1.19.1")
     testImplementation("junit:junit:4.13.2")
-    testImplementation("org.json:json:20240303")
-    implementation(platform("androidx.compose:compose-bom:2025.04.01"))
-    implementation("androidx.compose.material3:material3:1.5.0-beta01")
+    testImplementation("org.json:json:20260814")
+    implementation(platform("androidx.compose:compose-bom:2026.09.00"))
+    implementation("androidx.compose.material3:material3:1.5.0-beta02")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.animation:animation")
