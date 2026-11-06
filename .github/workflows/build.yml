@@ -34,7 +34,7 @@ jobs:
           "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0"
       - uses: gradle/actions/setup-gradle@v6
         with:
-          gradle-version: '8.14.3'
+          gradle-version: '9.8.2'
       - name: Compile updater
         run: gradle :updater:assembleDebug :updater:assembleRelease :updater:generatePomFileForReleasePublication :updater:testDebugUnitTest :updater:publishReleasePublicationToMavenLocal -PupdaterVersion=0.1.0-ci --stacktrace
       - name: Verify staged Maven package
@@ -60,7 +60,7 @@ jobs:
           "$SDKMANAGER" "platforms;android-36" "build-tools;36.0.0"
       - uses: gradle/actions/setup-gradle@v6
         with:
-          gradle-version: '8.14.3'
+          gradle-version: '9.8.2'
       - name: Publish verified release package
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
