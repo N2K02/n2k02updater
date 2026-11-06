@@ -5,7 +5,7 @@ plugins {
 }
 android {
     namespace = "dev.n2k02.updater"
-    compileSdk = 37
+    compileSdk { version = release(37) { minorApiLevel = 0 } }
     defaultConfig { minSdk = 26 }
     buildFeatures { compose = true }
     publishing { singleVariant("release") { withSourcesJar() } }
