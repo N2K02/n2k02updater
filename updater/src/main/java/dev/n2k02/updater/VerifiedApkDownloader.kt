@@ -12,7 +12,6 @@ import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
-import java.net.SocketTimeoutException
 import java.security.MessageDigest
 import kotlin.coroutines.coroutineContext
 
@@ -87,6 +86,11 @@ class VerifiedApkDownloader(private val context: Context) {
                 connection = openSecureConnection(release.apkUrl, null)
             }
             val status = connection.responseCode
+            // Status and host are safe to log; never record complete signed URLs.
+            val remoteHost = connection.url.host
+            val rateRemaining = connection.getHeaderField("X-RateLimit-Remaining")
+            Log.i("N2K02Updater", "APK HTTP response: host=$remoteHost status=$status" +
+                (rateRemaining?.let { " rateLimitRemaining=$it" } ?: ""))
             if ((offset > 0 && status != HttpURLConnection.HTTP_PARTIAL) ||
                 (offset == 0L && status != HttpURLConnection.HTTP_OK)) {
                 throw IOException("APK download failed (HTTP $status)")
