@@ -37,6 +37,10 @@ import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.rounded.CalendarMonth
 import androidx.compose.material.icons.rounded.CheckCircle
 import androidx.compose.material.icons.rounded.ChevronRight
+import androidx.compose.material.icons.rounded.KeyboardArrowDown
+import androidx.compose.material.icons.rounded.KeyboardArrowUp
+import androidx.compose.material.icons.rounded.SkipNext
+import androidx.compose.material.icons.rounded.Close
 import androidx.compose.material.icons.rounded.Download
 import androidx.compose.material.icons.rounded.ErrorOutline
 import androidx.compose.material.icons.rounded.FactCheck
@@ -51,6 +55,7 @@ import androidx.compose.material3.Button
 import androidx.compose.material3.Card
 import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
@@ -73,9 +78,11 @@ import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import java.text.DateFormat
 import java.util.Date
+import org.json.JSONObject
 
 private tailrec fun Context.findActivity(): Activity? = when (this) {
     is Activity -> this
@@ -179,7 +186,6 @@ private fun UpdatePageContent(
         runCatching { context.installedAppInfo() }.getOrNull()
     }
     var confirmLargeDownload by remember { mutableStateOf<UpdateRelease?>(null) }
-    var showDiagnostics by remember { mutableStateOf(false) }
     fun downloadOrConfirm(candidate: UpdateRelease) {
         if ((candidate.apkSize ?: 0L) >= 20L * 1024 * 1024 && context.isMeteredConnection()) {
             confirmLargeDownload = candidate
@@ -262,7 +268,8 @@ private fun UpdatePageContent(
         }
 
         Row(
-            horizontalArrangement = Arrangement.spacedBy(18.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalAlignment = Alignment.CenterVertically,
             modifier = Modifier.fillMaxWidth(),
         ) {
             MetaDate(
@@ -307,121 +314,182 @@ private fun UpdatePageContent(
 
         StatusPanel(status = status, installed = appInfo?.versionName)
 
-        // One prominent primary action. The status panel owns context and
-        // progress; we do not repeat status in a second nested action card.
+        // Only actual updater capabilities are surfaced: downloading supports Cancel,
+        // not Pause. Available updates keep Skip and Download side-by-side.
         when (val current = status) {
             is UpdateStatus.Downloading -> {
-                TextButton(
-                    modifier = Modifier.fillMaxWidth(),
-                    onClick = controller::cancel,
-                ) { Text("Cancel download") }
-            }
-            else -> {
-                Button(
+                OutlinedButton(
                     modifier = Modifier.fillMaxWidth(),
                     shape = MaterialTheme.shapes.extraLarge,
-                    enabled = current !is UpdateStatus.Checking &&
-                        (activity != null || current !is UpdateStatus.Ready &&
-                            current !is UpdateStatus.NeedsInstallPermission &&
-                            !(current is UpdateStatus.Failed && current.retryAction == UpdateRetryAction.INSTALL)),
-                    onClick = {
-                        when (current) {
-                            UpdateStatus.Idle, UpdateStatus.Current, is UpdateStatus.Failed -> {
-                                when (current) {
-                                    is UpdateStatus.Failed -> when (current.retryAction) {
-                                        UpdateRetryAction.DOWNLOAD -> current.release?.let(::downloadOrConfirm)
-                                            ?: controller.check(manual = true)
-                                        UpdateRetryAction.INSTALL -> activity?.let { controller.install(it, installGuard) }
-                                        UpdateRetryAction.CHECK -> controller.check(manual = true)
-                                    }
-                                    else -> controller.check(manual = true)
-                                }
-                            }
-                            is UpdateStatus.Available -> downloadOrConfirm(current.release)
-                            is UpdateStatus.Ready -> activity?.let { controller.install(it, installGuard) }
-                            is UpdateStatus.NeedsInstallPermission -> activity?.let(controller::openInstallPermission)
-                            else -> Unit
-                        }
-                    },
+                    onClick = controller::cancel,
                 ) {
-                    Icon(
-                        if (current is UpdateStatus.Available) Icons.Rounded.Download
-                        else if (current is UpdateStatus.Ready) Icons.Rounded.SystemUpdate
-                        else Icons.Rounded.Refresh,
-                        contentDescription = null,
-                    )
-                    Spacer(Modifier.size(8.dp))
-                    Text(current.primaryActionLabel())
+                    CenteredAction(Icons.Rounded.Close, "Cancel download")
                 }
             }
-        }
-
-        AnimatedVisibility(
-            visible = status is UpdateStatus.Available ||
-                status is UpdateStatus.NeedsInstallPermission ||
-                (status is UpdateStatus.Failed && (status as UpdateStatus.Failed).diagnostics != null),
-            enter = expandVertically(animationSpec = spring(stiffness = Spring.StiffnessLow)) + fadeIn(),
-            exit = shrinkVertically() + fadeOut(),
-        ) {
-            Column(Modifier.fillMaxWidth()) {
-                when (val current = status) {
-                    is UpdateStatus.Available -> TextButton(onClick = { controller.skip(current.release) }) {
-                        Text("Skip this version")
+            else -> {
+                val primaryEnabled = current !is UpdateStatus.Checking &&
+                    (activity != null || current !is UpdateStatus.Ready &&
+                        current !is UpdateStatus.NeedsInstallPermission &&
+                        !(current is UpdateStatus.Failed && current.retryAction == UpdateRetryAction.INSTALL))
+                val primaryAction: () -> Unit = {
+                    when (current) {
+                        UpdateStatus.Idle, UpdateStatus.Current, is UpdateStatus.Failed -> {
+                            when (current) {
+                                is UpdateStatus.Failed -> when (current.retryAction) {
+                                    UpdateRetryAction.DOWNLOAD -> current.release?.let(::downloadOrConfirm)
+                                        ?: controller.check(manual = true)
+                                    UpdateRetryAction.INSTALL -> activity?.let { controller.install(it, installGuard) }
+                                    UpdateRetryAction.CHECK -> controller.check(manual = true)
+                                }
+                                else -> controller.check(manual = true)
+                            }
+                        }
+                        is UpdateStatus.Available -> downloadOrConfirm(current.release)
+                        is UpdateStatus.Ready -> activity?.let { controller.install(it, installGuard) }
+                        is UpdateStatus.NeedsInstallPermission -> activity?.let(controller::openInstallPermission)
+                        else -> Unit
                     }
-                    is UpdateStatus.NeedsInstallPermission -> TextButton(
+                }
+                val primaryIcon = when (current) {
+                    is UpdateStatus.Available -> Icons.Rounded.Download
+                    is UpdateStatus.Ready -> Icons.Rounded.SystemUpdate
+                    else -> Icons.Rounded.Refresh
+                }
+                if (current is UpdateStatus.Available) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    ) {
+                        OutlinedButton(
+                            modifier = Modifier.weight(1f),
+                            onClick = { controller.skip(current.release) },
+                            shape = MaterialTheme.shapes.extraLarge,
+                        ) {
+                            CenteredAction(Icons.Rounded.SkipNext, "Skip this version")
+                        }
+                        Button(
+                            modifier = Modifier.weight(1f),
+                            enabled = primaryEnabled,
+                            onClick = primaryAction,
+                            shape = MaterialTheme.shapes.extraLarge,
+                        ) {
+                            CenteredAction(primaryIcon, current.primaryActionLabel())
+                        }
+                    }
+                } else {
+                    Button(
+                        modifier = Modifier.fillMaxWidth(),
+                        enabled = primaryEnabled,
+                        onClick = primaryAction,
+                        shape = MaterialTheme.shapes.extraLarge,
+                    ) {
+                        CenteredAction(primaryIcon, current.primaryActionLabel())
+                    }
+                }
+                if (current is UpdateStatus.NeedsInstallPermission) {
+                    TextButton(
+                        modifier = Modifier.fillMaxWidth(),
                         onClick = { activity?.let { controller.install(it, installGuard) } },
                         enabled = activity != null,
                     ) { Text("Try installation again") }
-                    is UpdateStatus.Failed -> {
-                        if (!current.diagnostics.isNullOrBlank()) {
-                            TextButton(onClick = { showDiagnostics = !showDiagnostics }) {
-                                Text(if (showDiagnostics) "Hide error details" else "Show error details")
-                            }
-                            AnimatedVisibility(visible = showDiagnostics) {
-                                Text(current.diagnostics.orEmpty(), style = MaterialTheme.typography.bodySmall)
-                            }
-                        }
-                    }
-                    else -> Unit
                 }
             }
         }
 
-        // Show only information that changes the update decision. Installed
-        // version and dates are already visible at the top of this page.
-        if (release != null) {
-            release.apkSize?.takeIf { it > 0L }?.let { bytes ->
-                Text(
-                    "${if (release.experimental) "Experimental" else "Stable"} update · ${displaySize(bytes)}",
-                    style = MaterialTheme.typography.bodySmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            if (release.notes.isNotEmpty()) {
-                var showNotes by remember(release.tag) { mutableStateOf(false) }
-                TextButton(onClick = { showNotes = !showNotes }) {
-                    Text(if (showNotes) "Hide what's new" else "What's new in ${release.tag}")
-                }
-                AnimatedVisibility(
-                    visible = showNotes,
-                    enter = expandVertically(animationSpec = spring(stiffness = Spring.StiffnessLow)) + fadeIn(),
-                    exit = shrinkVertically() + fadeOut(),
-                ) {
-                    Text(
-                        release.notes.joinToString("\n") { "• $it" },
-                        style = MaterialTheme.typography.bodyMedium,
-                    )
-                }
-            }
+        val failedStatus = status as? UpdateStatus.Failed
+        if (failedStatus != null && !failedStatus.diagnostics.isNullOrBlank()) {
+            ExpandableDetailsCard(
+                title = "Error details",
+                content = formatUpdaterDiagnostics(failedStatus.diagnostics.orEmpty()),
+                isError = true,
+                resetKey = "error-${failedStatus.message}-${failedStatus.diagnostics}",
+            )
+        }
+        if (release != null && release.notes.isNotEmpty()) {
+            ExpandableDetailsCard(
+                title = "What's new",
+                content = release.notes.joinToString("\n") { "• $it" },
+                resetKey = release.tag,
+            )
         }
     }
 }
 
 @Composable
 private fun MetaDate(title: String, date: Long, modifier: Modifier = Modifier, checking: Boolean = false) {
-    Column(modifier = modifier, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Text(title, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
-        Text(if (checking) "Checking now…" else displayDate(date), style = MaterialTheme.typography.bodySmall)
+    Column(
+        modifier = modifier,
+        horizontalAlignment = Alignment.CenterHorizontally,
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
+        Text(title, style = MaterialTheme.typography.labelMedium,
+            color = MaterialTheme.colorScheme.onSurfaceVariant, textAlign = TextAlign.Center)
+        Text(if (checking) "Checking now…" else displayDate(date),
+            style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center)
+    }
+}
+
+/** Icon and text are measured as one centered group at every available screen width. */
+@Composable
+private fun CenteredAction(icon: ImageVector, label: String) {
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.Center,
+    ) {
+        Icon(icon, contentDescription = null, modifier = Modifier.size(18.dp))
+        Spacer(Modifier.size(6.dp))
+        Text(label, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            textAlign = TextAlign.Center, style = MaterialTheme.typography.labelMedium)
+    }
+}
+
+/** Keep arbitrary diagnostics as text if they cannot be parsed as JSON. */
+internal fun formatUpdaterDiagnostics(raw: String): String =
+    runCatching { JSONObject(raw).toString(2) }.getOrDefault(raw)
+
+@Composable
+private fun ExpandableDetailsCard(
+    title: String,
+    content: String,
+    resetKey: String,
+    isError: Boolean = false,
+) {
+    var expanded by remember(resetKey) { mutableStateOf(false) }
+    Card(
+        modifier = Modifier.fillMaxWidth().animateContentSize(
+            animationSpec = spring(stiffness = Spring.StiffnessLow)),
+        shape = MaterialTheme.shapes.extraLarge,
+        colors = CardDefaults.cardColors(
+            containerColor = if (isError) MaterialTheme.colorScheme.errorContainer
+                else MaterialTheme.colorScheme.surfaceContainerHigh,
+        ),
+    ) {
+        Column(modifier = Modifier.fillMaxWidth().padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(10.dp)) {
+            Row(verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+                Icon(if (isError) Icons.Rounded.ErrorOutline else Icons.Rounded.Feed,
+                    contentDescription = null)
+                Text(title, modifier = Modifier.weight(1f),
+                    style = MaterialTheme.typography.titleMedium, fontWeight = FontWeight.SemiBold)
+            }
+            Text(
+                content,
+                style = if (isError) MaterialTheme.typography.bodySmall
+                    else MaterialTheme.typography.bodyMedium,
+                maxLines = if (expanded) Int.MAX_VALUE else 3,
+                overflow = TextOverflow.Ellipsis,
+            )
+            TextButton(
+                modifier = Modifier.fillMaxWidth(),
+                onClick = { expanded = !expanded },
+            ) {
+                CenteredAction(
+                    if (expanded) Icons.Rounded.KeyboardArrowUp else Icons.Rounded.KeyboardArrowDown,
+                    if (expanded) "Show less" else "Show more",
+                )
+            }
+        }
     }
 }
 
@@ -512,6 +580,24 @@ private fun StatusPanel(status: UpdateStatus, installed: String?) {
                             style = MaterialTheme.typography.bodyMedium,
                         )
                     }
+                }
+                val selectedRelease = when (val current = status) {
+                    is UpdateStatus.Available -> current.release
+                    is UpdateStatus.Downloading -> current.release
+                    is UpdateStatus.Ready -> current.release
+                    is UpdateStatus.NeedsInstallPermission -> current.release
+                    is UpdateStatus.Failed -> current.release
+                    else -> null
+                }
+                if (selectedRelease != null) {
+                    Spacer(Modifier.size(10.dp))
+                    Text(
+                        (if (selectedRelease.experimental) "Experimental" else "Stable") +
+                            " update" +
+                            (selectedRelease.apkSize?.takeIf { it > 0L }
+                                ?.let { " · ${displaySize(it)}" } ?: ""),
+                        style = MaterialTheme.typography.labelMedium,
+                    )
                 }
                 if (phase == UpdatePagePhase.DOWNLOADING) {
                     val progress = (status as? UpdateStatus.Downloading)?.progress
