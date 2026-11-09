@@ -57,6 +57,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LoadingIndicator
@@ -267,22 +268,32 @@ private fun UpdatePageContent(
             }
         }
 
-        Row(
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            verticalAlignment = Alignment.CenterVertically,
+        Surface(
             modifier = Modifier.fillMaxWidth(),
+            shape = MaterialTheme.shapes.extraLarge,
+            color = MaterialTheme.colorScheme.surfaceContainerLow,
         ) {
-            MetaDate(
-                title = "Last updated",
-                date = appInfo?.lastUpdatedAt ?: 0L,
-                modifier = Modifier.weight(1f),
-            )
-            MetaDate(
-                title = "Last checked",
-                date = lastCheckedAt,
-                modifier = Modifier.weight(1f),
-                checking = status is UpdateStatus.Checking,
-            )
+            Row(
+                horizontalArrangement = Arrangement.spacedBy(8.dp),
+                verticalAlignment = Alignment.CenterVertically,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 14.dp),
+            ) {
+                MetaDate(
+                    title = "Last updated",
+                    date = appInfo?.lastUpdatedAt ?: 0L,
+                    modifier = Modifier.weight(1f),
+                )
+                VerticalDivider(
+                    modifier = Modifier.size(width = 1.dp, height = 34.dp),
+                    color = MaterialTheme.colorScheme.outlineVariant,
+                )
+                MetaDate(
+                    title = "Last checked",
+                    date = lastCheckedAt,
+                    modifier = Modifier.weight(1f),
+                    checking = status is UpdateStatus.Checking,
+                )
+            }
         }
         if (lastCheckFailed) {
             Text(
@@ -598,6 +609,19 @@ private fun StatusPanel(status: UpdateStatus, installed: String?) {
                                 ?.let { " · ${displaySize(it)}" } ?: ""),
                         style = MaterialTheme.typography.labelMedium,
                     )
+                }
+                if (phase == UpdatePagePhase.CURRENT) {
+                    Spacer(Modifier.size(12.dp))
+                    Surface(
+                        shape = MaterialTheme.shapes.large,
+                        color = MaterialTheme.colorScheme.surface.copy(alpha = 0.20f),
+                    ) {
+                        Text(
+                            "No update required",
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp),
+                            style = MaterialTheme.typography.labelMedium,
+                        )
+                    }
                 }
                 if (phase == UpdatePagePhase.DOWNLOADING) {
                     val progress = (status as? UpdateStatus.Downloading)?.progress
