@@ -3,13 +3,16 @@ package dev.n2k02.updater
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.SocketTimeoutException
 import java.security.MessageDigest
 import kotlin.coroutines.coroutineContext
 
@@ -24,6 +27,28 @@ class VerifiedApkDownloader(private val context: Context) {
      * are never installable until the complete file is rehashed and verified.
      */
     suspend fun download(
+        release: UpdateRelease,
+        config: UpdateConfig,
+        onProgress: (Float?) -> Unit = {},
+    ): File {
+        for (attempt in 0..DownloadRetryPolicy.maxRetries) {
+            coroutineContext.ensureActive()
+            try {
+                return downloadOnce(release, config, onProgress)
+            } catch (failure: IOException) {
+                val retry = DownloadRetryPolicy.shouldRetry(failure, attempt)
+                // Never log a complete URL: signed release URLs may carry credentials.
+                val host = runCatching { URL(release.apkUrl).host }.getOrDefault("unknown")
+                Log.w("N2K02Updater", "APK download failed: host=$host attempt=${attempt + 1} " +
+                    "retry=$retry reason=${DownloadRetryPolicy.reason(failure)}")
+                if (!retry) throw failure
+                delay(DownloadRetryPolicy.backoffMillis(attempt))
+            }
+        }
+        error("Unreachable retry state")
+    }
+
+    private suspend fun downloadOnce(
         release: UpdateRelease,
         config: UpdateConfig,
         onProgress: (Float?) -> Unit = {},
