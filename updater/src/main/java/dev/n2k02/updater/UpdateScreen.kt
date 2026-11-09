@@ -396,18 +396,19 @@ private fun UpdatePageContent(
             }
         }
 
-        if (status is UpdateStatus.Failed && !status.diagnostics.isNullOrBlank()) {
+        val failedStatus = status as? UpdateStatus.Failed
+        if (failedStatus != null && !failedStatus.diagnostics.isNullOrBlank()) {
             ExpandableDetailsCard(
                 title = "Error details",
-                content = formatUpdaterDiagnostics(status.diagnostics),
+                content = formatUpdaterDiagnostics(failedStatus.diagnostics.orEmpty()),
                 isError = true,
-                resetKey = "error-${status.message}-${status.diagnostics}",
+                resetKey = "error-${failedStatus.message}-${failedStatus.diagnostics}",
             )
         }
         if (release != null && release.notes.isNotEmpty()) {
             ExpandableDetailsCard(
                 title = "What's new",
-                content = release.notes.joinToString("\\n") { "• $it" },
+                content = release.notes.joinToString("\n") { "• $it" },
                 resetKey = release.tag,
             )
         }
