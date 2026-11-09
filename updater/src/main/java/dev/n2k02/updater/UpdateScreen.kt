@@ -57,6 +57,7 @@ import androidx.compose.material3.CardDefaults
 import androidx.compose.material3.FilledTonalButton
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.LoadingIndicator
@@ -282,7 +283,7 @@ private fun UpdatePageContent(
                     date = appInfo?.lastUpdatedAt ?: 0L,
                     modifier = Modifier.weight(1f),
                 )
-                HorizontalDivider(
+                VerticalDivider(
                     modifier = Modifier.size(width = 1.dp, height = 34.dp),
                     color = MaterialTheme.colorScheme.outlineVariant,
                 )
