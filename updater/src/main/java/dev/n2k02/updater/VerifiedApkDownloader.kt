@@ -83,8 +83,8 @@ class VerifiedApkDownloader(private val context: Context) {
                 throw IOException("APK download failed (HTTP $resumeStatus)")
             }
             if (offset > 0L &&
-                !DownloadResumePolicy.canAppend(
-                    offset, connection.responseCode, connection.getHeaderField("Content-Range")
+                DownloadResumePolicy.shouldResetPartial(
+                    resumeStatus, connection.getHeaderField("Content-Range"), offset
                 )) {
                 // 200, 416, or a malformed range: restart safely instead of
                 // appending duplicate or mismatched data to an existing file.
