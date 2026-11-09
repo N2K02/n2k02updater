@@ -12,7 +12,7 @@ import java.net.SocketTimeoutException
 internal object DownloadRetryPolicy {
     const val maxRetries = 3
     private val transientStatuses = setOf(408, 502, 503, 504)
-    private val statusPattern = Regex("""HTTP (\\d{3})""")
+    private val statusPattern = Regex("""HTTP (\d{3})""")
 
     fun status(error: IOException): Int? =
         statusPattern.find(error.message.orEmpty())?.groupValues?.get(1)?.toIntOrNull()
