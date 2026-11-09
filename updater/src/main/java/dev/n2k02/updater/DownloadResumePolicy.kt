@@ -4,6 +4,11 @@ package dev.n2k02.updater
 internal object DownloadResumePolicy {
     private val CONTENT_RANGE = Regex("bytes (\\d+)-(\\d+)/(\\d+)")
 
+    /** A gateway error is retried without destroying valid partial bytes. */
+    fun shouldResetPartial(statusCode: Int, contentRange: String?, offset: Long): Boolean =
+        statusCode == 200 || statusCode == 416 ||
+            (statusCode == 206 && !canAppend(offset, statusCode, contentRange))
+
     fun canAppend(offset: Long, statusCode: Int, contentRange: String?): Boolean {
         if (offset <= 0 || statusCode != 206) return false
         val parts = CONTENT_RANGE.matchEntire(contentRange.orEmpty()) ?: return false

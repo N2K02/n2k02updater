@@ -17,6 +17,22 @@ Private, reusable Android in-app updater for N2K02 apps, based on the existing m
 5. **Distribution:** versioned private dependency; public consuming repositories must authenticate without exposing credentials.
 
 
+## Resilient APK downloads
+
+- HTTPS-only redirects, checksum-scoped partial APKs, and safe HTTP Range validation.
+- Retry HTTP 408/502/503/504, socket timeouts and unexpected EOF up to three times
+  with bounded backoff. Rate limits (403/429), bad checksums, invalid package names
+  and untrusted signing certificates never trigger automatic retries.
+- Transient HTTP errors leave partial APK bytes intact; ignored or malformed Range
+  responses restart at offset zero to prevent file corruption.
+- Download logs use the `N2K02Updater` tag and include only the server hostname,
+  HTTP status, attempt and retry reason; URLs and authentication query strings
+  must never be recorded.
+- All successful APKs are verified for SHA-256, package identity, version
+  progression and trusted signing certificate before Android's installer opens.
+- Consumers must pin a **published** Maven package release; changing the source
+  repository alone does not update already shipped APKs.
+
 ## Shared "New" update badges
 
 The updater now owns the pending-update state check and a Material 3 **New** badge.

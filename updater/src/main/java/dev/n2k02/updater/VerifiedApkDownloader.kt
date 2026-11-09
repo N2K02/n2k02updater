@@ -3,8 +3,10 @@ package dev.n2k02.updater
 import android.content.Context
 import android.content.pm.PackageManager
 import android.os.Build
+import android.util.Log
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.ensureActive
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import java.io.File
 import java.io.IOException
@@ -24,6 +26,28 @@ class VerifiedApkDownloader(private val context: Context) {
      * are never installable until the complete file is rehashed and verified.
      */
     suspend fun download(
+        release: UpdateRelease,
+        config: UpdateConfig,
+        onProgress: (Float?) -> Unit = {},
+    ): File {
+        for (attempt in 0..DownloadRetryPolicy.maxRetries) {
+            coroutineContext.ensureActive()
+            try {
+                return downloadOnce(release, config, onProgress)
+            } catch (failure: IOException) {
+                val retry = DownloadRetryPolicy.shouldRetry(failure, attempt)
+                // Never log a complete URL: signed release URLs may carry credentials.
+                val host = runCatching { URL(release.apkUrl).host }.getOrDefault("unknown")
+                Log.w("N2K02Updater", "APK download failed: host=$host attempt=${attempt + 1} " +
+                    "retry=$retry reason=${DownloadRetryPolicy.reason(failure)}")
+                if (!retry) throw failure
+                delay(DownloadRetryPolicy.backoffMillis(attempt))
+            }
+        }
+        error("Unreachable retry state")
+    }
+
+    private suspend fun downloadOnce(
         release: UpdateRelease,
         config: UpdateConfig,
         onProgress: (Float?) -> Unit = {},
@@ -50,9 +74,17 @@ class VerifiedApkDownloader(private val context: Context) {
         }
         var connection = openSecureConnection(release.apkUrl, offset.takeIf { it > 0 })
         try {
+            // Transient responses must leave the verified-checksum-scoped partial intact.
+            // Only a successful full-body response, unsatisfiable range, or malformed
+            // partial-body response can cause a safe reset to byte zero.
+            val resumeStatus = connection.responseCode
+            if (offset > 0L && resumeStatus != HttpURLConnection.HTTP_OK &&
+                resumeStatus != HttpURLConnection.HTTP_PARTIAL && resumeStatus != 416) {
+                throw IOException("APK download failed (HTTP $resumeStatus)")
+            }
             if (offset > 0L &&
-                !DownloadResumePolicy.canAppend(
-                    offset, connection.responseCode, connection.getHeaderField("Content-Range")
+                DownloadResumePolicy.shouldResetPartial(
+                    resumeStatus, connection.getHeaderField("Content-Range"), offset
                 )) {
                 // 200, 416, or a malformed range: restart safely instead of
                 // appending duplicate or mismatched data to an existing file.
@@ -62,6 +94,11 @@ class VerifiedApkDownloader(private val context: Context) {
                 connection = openSecureConnection(release.apkUrl, null)
             }
             val status = connection.responseCode
+            // Status and host are safe to log; never record complete signed URLs.
+            val remoteHost = connection.url.host
+            val rateRemaining = connection.getHeaderField("X-RateLimit-Remaining")
+            Log.i("N2K02Updater", "APK HTTP response: host=$remoteHost status=$status" +
+                (rateRemaining?.let { " rateLimitRemaining=$it" } ?: ""))
             if ((offset > 0 && status != HttpURLConnection.HTTP_PARTIAL) ||
                 (offset == 0L && status != HttpURLConnection.HTTP_OK)) {
                 throw IOException("APK download failed (HTTP $status)")
@@ -107,8 +144,9 @@ class VerifiedApkDownloader(private val context: Context) {
                 }
             }
             // A truncated response can be resumed later, but must never install.
-            if (release.apkSize != null && received != release.apkSize) {
-                throw IOException("APK size mismatch; retry to resume download")
+            if (total != null && received != total) {
+                // Leave the partial intact. A future attempt can safely resume it.
+                throw java.io.EOFException("APK response truncated; retry to resume download")
             }
             val actualHash = digest.digest().joinToString("") { "%02x".format(it) }
             if (!actualHash.equals(expectedHash, ignoreCase = true)) {
@@ -138,6 +176,8 @@ class VerifiedApkDownloader(private val context: Context) {
             connection.connectTimeout = 15_000
             connection.readTimeout = 30_000
             connection.instanceFollowRedirects = false
+            connection.setRequestProperty("User-Agent", "N2K02Updater-Android")
+            connection.setRequestProperty("Accept-Encoding", "identity")
             if (rangeStart != null) connection.setRequestProperty("Range", "bytes=$rangeStart-")
             val status = connection.responseCode
             if (status in 300..399) {
