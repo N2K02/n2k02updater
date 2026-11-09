@@ -74,6 +74,14 @@ class VerifiedApkDownloader(private val context: Context) {
         }
         var connection = openSecureConnection(release.apkUrl, offset.takeIf { it > 0 })
         try {
+            // Transient responses must leave the verified-checksum-scoped partial intact.
+            // Only a successful full-body response, unsatisfiable range, or malformed
+            // partial-body response can cause a safe reset to byte zero.
+            val resumeStatus = connection.responseCode
+            if (offset > 0L && resumeStatus != HttpURLConnection.HTTP_OK &&
+                resumeStatus != HttpURLConnection.HTTP_PARTIAL && resumeStatus != 416) {
+                throw IOException("APK download failed (HTTP $resumeStatus)")
+            }
             if (offset > 0L &&
                 !DownloadResumePolicy.canAppend(
                     offset, connection.responseCode, connection.getHeaderField("Content-Range")
@@ -136,8 +144,9 @@ class VerifiedApkDownloader(private val context: Context) {
                 }
             }
             // A truncated response can be resumed later, but must never install.
-            if (release.apkSize != null && received != release.apkSize) {
-                throw IOException("APK size mismatch; retry to resume download")
+            if (total != null && received != total) {
+                // Leave the partial intact. A future attempt can safely resume it.
+                throw java.io.EOFException("APK response truncated; retry to resume download")
             }
             val actualHash = digest.digest().joinToString("") { "%02x".format(it) }
             if (!actualHash.equals(expectedHash, ignoreCase = true)) {
@@ -167,6 +176,8 @@ class VerifiedApkDownloader(private val context: Context) {
             connection.connectTimeout = 15_000
             connection.readTimeout = 30_000
             connection.instanceFollowRedirects = false
+            connection.setRequestProperty("User-Agent", "N2K02Updater-Android")
+            connection.setRequestProperty("Accept-Encoding", "identity")
             if (rangeStart != null) connection.setRequestProperty("Range", "bytes=$rangeStart-")
             val status = connection.responseCode
             if (status in 300..399) {
