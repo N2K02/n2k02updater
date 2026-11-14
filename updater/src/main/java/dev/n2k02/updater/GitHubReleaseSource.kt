@@ -49,7 +49,7 @@ class GitHubReleaseSource(
             return (0 until releases.length()).mapNotNull { index ->
                 val release = releases.optJSONObject(index) ?: return@mapNotNull null
                 if (release.optBoolean("draft") || !release.optBoolean("prerelease")) return@mapNotNull null
-                val code = Regex("""(?im)^\\s*Version code:\\s*(\\d+)\\s*$""")
+                val code = Regex("""(?im)^\s*Version code:\s*(\d+)\s*$""")
                     .find(release.optString("body"))?.groupValues?.get(1)?.toLongOrNull()
                     ?: return@mapNotNull null
                 if (code <= installedVersionCode) return@mapNotNull null
