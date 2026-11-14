@@ -33,6 +33,17 @@ class GitHubReleaseChannelsTest {
         assertEquals(false, result?.experimental)
     }
 
+
+    @Test fun experimentalRunTagRecoversMissingReleaseNotesCode() {
+        val json = "[${release("experimental-pr-79-run-1178", 0, true).replace("Version code: 0", "No version field")}]"
+        val result = GitHubReleaseSource.parseExperimentalReleases(json, 100000)
+        assertEquals(101178L, result?.versionCode)
+    }
+
+    @Test fun stablePrefixUsedBySDCleanerIsRecognized() {
+        assertEquals(21L, GitHubReleaseSource.defaultVersionCode("sdcleaner-v2.1"))
+    }
+
     @Test fun ignoresOlderExperimental() {
         assertNull(GitHubReleaseSource.parseExperimentalReleases("[${release("experimental", 1002, true)}]", 1002))
     }
