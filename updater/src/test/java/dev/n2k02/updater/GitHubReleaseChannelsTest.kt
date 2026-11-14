@@ -6,7 +6,7 @@ import org.junit.Test
 class GitHubReleaseChannelsTest {
     private fun release(tag: String, code: Long, prerelease: Boolean, apk: Boolean = true): String =
         """{"tag_name":"$tag","draft":false,"prerelease":$prerelease,
-            "body":"Version code: $code\\n### What's new\\n- Test update",
+            "body":"Version code: $code\n### What's new\n- Test update",
             "published_at":"2026-11-15T00:00:00Z",
             "assets":[${if (apk) """{"name":"test.apk","browser_download_url":"https://github.com/N2K02/SEQ/releases/download/$tag/test.apk","size":100,"digest":"sha256:${"a".repeat(64)}"}""" else ""}]}"""
 
