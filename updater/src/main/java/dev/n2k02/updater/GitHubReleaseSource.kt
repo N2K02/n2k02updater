@@ -16,7 +16,7 @@ class GitHubReleaseSource(
 ) {
     fun latest(config: UpdateConfig): UpdateRelease? {
         val stable = fetchReleases(config.repository, latest = true)
-            ?.let { parseRelease(it, config.installedVersionCode) }
+            ?.let { parseRelease(it, config.installedVersionCode, repository = config.repository) }
         if (!config.experimentalEnabled) return stable
         val experimental = fetchReleases(config.repository, latest = false)
             ?.let { parseExperimentalReleases(it, config.installedVersionCode) }
@@ -99,14 +99,12 @@ class GitHubReleaseSource(
             json: String,
             installedVersionCode: Long,
             versionCodeFromTag: (String) -> Long? = ::defaultVersionCode,
+            repository: String? = null,
         ): UpdateRelease? {
             val root = JSONObject(json)
             if (root.optBoolean("draft") || root.optBoolean("prerelease")) return null
             val tag = root.optString("tag_name").trim()
             if (tag.isBlank()) return null
-            val code = releaseVersionCode(root.optString("body"))
-                ?: versionCodeFromTag(tag) ?: return null
-            if (code <= installedVersionCode) return null
             val assets = root.optJSONArray("assets") ?: return null
             for (index in 0 until assets.length()) {
                 val asset = assets.optJSONObject(index) ?: continue
@@ -115,6 +113,10 @@ class GitHubReleaseSource(
                 if (!name.endsWith(".apk", ignoreCase = true) ||
                     !downloadUrl.startsWith("https://github.com/")) continue
                 val digest = asset.optString("digest")
+                val code = releaseVersionCode(root.optString("body"))
+                    ?: HistoricalStableVersions.find(repository, tag, digest)
+                    ?: versionCodeFromTag(tag) ?: continue
+                if (code <= installedVersionCode) continue
                 val sha = digest.removePrefix("sha256:").lowercase()
                     .takeIf { digest.startsWith("sha256:") && it.matches(Regex("[a-f0-9]{64}")) }
                 return UpdateRelease(
