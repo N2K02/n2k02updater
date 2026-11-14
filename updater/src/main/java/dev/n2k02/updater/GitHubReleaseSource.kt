@@ -43,14 +43,25 @@ class GitHubReleaseSource(
     }
 
     companion object {
+        fun releaseVersionCode(body: String): Long? =
+            Regex("""(?im)^\s*Version code:\s*(\d+)\s*$""")
+                .find(body)?.groupValues?.get(1)?.toLongOrNull()
+
+        /** Existing experimental build tags encode versionCode as 100000 + run number. */
+        fun experimentalVersionCode(tag: String): Long? {
+            val run = Regex("""^experimental-pr-\d+-run-(\d+)$""", RegexOption.IGNORE_CASE)
+                .matchEntire(tag)?.groupValues?.get(1)?.toLongOrNull() ?: return null
+            return if (run > 0 && run <= Long.MAX_VALUE - 100_000L) 100_000L + run else null
+        }
+
         /** GitHub prereleases carry their Android versionCode in the release notes. */
         fun parseExperimentalReleases(json: String, installedVersionCode: Long): UpdateRelease? {
             val releases = JSONArray(json)
             return (0 until releases.length()).mapNotNull { index ->
                 val release = releases.optJSONObject(index) ?: return@mapNotNull null
                 if (release.optBoolean("draft") || !release.optBoolean("prerelease")) return@mapNotNull null
-                val code = Regex("""(?im)^\s*Version code:\s*(\d+)\s*$""")
-                    .find(release.optString("body"))?.groupValues?.get(1)?.toLongOrNull()
+                val code = releaseVersionCode(release.optString("body"))
+                    ?: experimentalVersionCode(release.optString("tag_name"))
                     ?: return@mapNotNull null
                 if (code <= installedVersionCode) return@mapNotNull null
                 val tag = release.optString("tag_name").trim()
@@ -93,8 +104,7 @@ class GitHubReleaseSource(
             if (root.optBoolean("draft") || root.optBoolean("prerelease")) return null
             val tag = root.optString("tag_name").trim()
             if (tag.isBlank()) return null
-            val code = Regex("""(?im)^\s*Version code:\s*(\d+)\s*$""")
-                .find(root.optString("body"))?.groupValues?.get(1)?.toLongOrNull()
+            val code = releaseVersionCode(root.optString("body"))
                 ?: versionCodeFromTag(tag) ?: return null
             if (code <= installedVersionCode) return null
             val assets = root.optJSONArray("assets") ?: return null
