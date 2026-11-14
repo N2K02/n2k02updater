@@ -136,7 +136,7 @@ class GitHubReleaseSource(
 
         /** Default mapping for v1.8 -> 18, matching the original mRadio convention. */
         fun defaultVersionCode(tag: String): Long? {
-            val match = Regex("^v?(\\d+)\\.(\\d+)$", RegexOption.IGNORE_CASE).matchEntire(tag)
+            val match = Regex("^(?:sdcleaner-)?v?(\\d+)\\.(\\d+)$", RegexOption.IGNORE_CASE).matchEntire(tag)
                 ?: return null
             val major = match.groupValues[1].toLongOrNull() ?: return null
             val minor = match.groupValues[2].toLongOrNull() ?: return null
