@@ -93,7 +93,9 @@ class GitHubReleaseSource(
             if (root.optBoolean("draft") || root.optBoolean("prerelease")) return null
             val tag = root.optString("tag_name").trim()
             if (tag.isBlank()) return null
-            val code = versionCodeFromTag(tag) ?: return null
+            val code = Regex("""(?im)^\s*Version code:\s*(\d+)\s*$""")
+                .find(root.optString("body"))?.groupValues?.get(1)?.toLongOrNull()
+                ?: versionCodeFromTag(tag) ?: return null
             if (code <= installedVersionCode) return null
             val assets = root.optJSONArray("assets") ?: return null
             for (index in 0 until assets.length()) {
