@@ -47,4 +47,21 @@ class GitHubReleaseChannelsTest {
     @Test fun ignoresOlderExperimental() {
         assertNull(GitHubReleaseSource.parseExperimentalReleases("[${release("experimental", 1002, true)}]", 1002))
     }
+
+    @Test fun historicalStableUsesVerifiedRepositoryTagAndDigest() {
+        val hash = "4b4072a5050a244844b7841fa37647406c1f51d69b70c61bd20ea0f452b4eace"
+        val json = release("v5.9", 0, false).replace("Version code: 0", "Legacy notes")
+            .replace("sha256:${"a".repeat(64)}", "sha256:$hash")
+        val found = GitHubReleaseSource.parseRelease(json, 100200, repository = "N2K02/BCam")
+        assertEquals(100222L, found?.versionCode)
+        assertNull(GitHubReleaseSource.parseRelease(json, 100200, repository = "N2K02/Other"))
+        assertNull(GitHubReleaseSource.parseRelease(json.replace(hash, "b".repeat(64)), 100200, repository = "N2K02/BCam"))
+        assertNull(GitHubReleaseSource.parseRelease(json, 100222, repository = "N2K02/BCam"))
+    }
+
+    @Test fun explicitVersionCodeTakesPriorityOverHistoricalRecord() {
+        val hash = "4b4072a5050a244844b7841fa37647406c1f51d69b70c61bd20ea0f452b4eace"
+        val json = release("v5.9", 100223, false).replace("sha256:${"a".repeat(64)}", "sha256:$hash")
+        assertEquals(100223L, GitHubReleaseSource.parseRelease(json, 100200, repository = "N2K02/BCam")?.versionCode)
+    }
 }
