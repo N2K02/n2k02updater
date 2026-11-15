@@ -96,6 +96,16 @@ class UpdaterController(
         installed >= versionCode
     }.getOrDefault(false)
 
+    /** Refresh the installed build from Android rather than a stale host snapshot. */
+    @Suppress("DEPRECATION")
+    private fun liveConfig(): UpdateConfig {
+        val installedCode = runCatching {
+            val info = appContext.packageManager.getPackageInfo(config.packageName, 0)
+            if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong()
+        }.getOrElse { config.installedVersionCode }
+        return config.copy(installedVersionCode = installedCode)
+    }
+
     fun check(manual: Boolean = true) {
         // Never cancel a verified install or an active download to run a check.
         when (mutableStatus.value) {
@@ -129,9 +139,10 @@ class UpdaterController(
             if (previousOffer == null) mutableStatus.value = UpdateStatus.Checking
             try {
                 val release = withContext(Dispatchers.IO) {
+                    val currentConfig = liveConfig()
                     UpdateSourceFallback.resolve(
-                        published = publishedSource?.let { source -> { source.latest(config) } },
-                        github = { releaseSource.latest(config) },
+                        published = publishedSource?.let { source -> { source.latest(currentConfig) } },
+                        github = { releaseSource.latest(currentConfig) },
                     )
                 }
                 val offered = release?.takeIf {
@@ -181,14 +192,14 @@ class UpdaterController(
     }
 
     fun download(release: UpdateRelease) {
-        if (release.versionCode <= config.installedVersionCode) return
+        if (release.versionCode <= liveConfig().installedVersionCode) return
         operation?.cancel()
         verifiedFile = null
         installerOpened = false
         operation = scope.launch {
             mutableStatus.value = UpdateStatus.Downloading(release, null)
             try {
-                verifiedFile = downloader.download(release, config) { progress ->
+                verifiedFile = downloader.download(release, liveConfig()) { progress ->
                     mutableStatus.value = UpdateStatus.Downloading(release, progress)
                 }
                 mutableStatus.value = UpdateStatus.Ready(release)
