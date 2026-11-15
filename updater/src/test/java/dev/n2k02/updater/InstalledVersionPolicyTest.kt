@@ -8,7 +8,7 @@ import org.junit.Test
 class InstalledVersionPolicyTest {
     @Test fun liveInstalledCodeOverridesStaleStartupConfiguration() {
         assertEquals(100500L, InstalledVersionPolicy.effectiveCode(100200L, 100500L))
-        assertEquals(100500L, InstalledVersionPolicy.effectiveCode(100500L, 100100L))
+        assertEquals(100100L, InstalledVersionPolicy.effectiveCode(100500L, 100100L))
     }
     @Test fun missingPackageMetadataFallsBackWithoutInventingVersion() {
         assertEquals(123L, InstalledVersionPolicy.effectiveCode(123L, null))
