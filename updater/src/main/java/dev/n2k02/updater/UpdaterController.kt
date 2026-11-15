@@ -103,7 +103,7 @@ class UpdaterController(
             val info = appContext.packageManager.getPackageInfo(config.packageName, 0)
             if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong()
         }.getOrElse { config.installedVersionCode }
-        return config.copy(installedVersionCode = installedCode)
+        return config.copy(installedVersionCode = InstalledVersionPolicy.effectiveCode(config.installedVersionCode, installedCode))
     }
 
     fun check(manual: Boolean = true) {
@@ -192,7 +192,7 @@ class UpdaterController(
     }
 
     fun download(release: UpdateRelease) {
-        if (release.versionCode <= liveConfig().installedVersionCode) return
+        if (!InstalledVersionPolicy.canInstall(liveConfig().installedVersionCode, release.versionCode)) return
         operation?.cancel()
         verifiedFile = null
         installerOpened = false
