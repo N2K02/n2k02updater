@@ -99,11 +99,15 @@ class UpdaterController(
     /** Refresh the installed build from Android rather than a stale host snapshot. */
     @Suppress("DEPRECATION")
     private fun liveConfig(): UpdateConfig {
+        val installedPackage = appContext.packageName
         val installedCode = runCatching {
-            val info = appContext.packageManager.getPackageInfo(config.packageName, 0)
+            val info = appContext.packageManager.getPackageInfo(installedPackage, 0)
             if (Build.VERSION.SDK_INT >= 28) info.longVersionCode else info.versionCode.toLong()
         }.getOrElse { config.installedVersionCode }
-        return config.copy(installedVersionCode = InstalledVersionPolicy.effectiveCode(config.installedVersionCode, installedCode))
+        return config.copy(
+            packageName = installedPackage,
+            installedVersionCode = InstalledVersionPolicy.effectiveCode(config.installedVersionCode, installedCode),
+        )
     }
 
     fun check(manual: Boolean = true) {
