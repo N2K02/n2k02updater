@@ -46,6 +46,7 @@ jobs:
           gradle-version: '9.8.2'
       # One release channel: each merge to main publishes the next 0.1.x version.
       - name: Verify merged commit is current main
+        id: gate
         env:
           GH_TOKEN: ${{ github.token }}
           MERGED_SHA: ${{ github.event.pull_request.merge_commit_sha }}
@@ -53,10 +54,14 @@ jobs:
           if [ "$GITHUB_EVENT_NAME" = "pull_request_target" ]; then
             current=$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)
             test "$current" = "$MERGED_SHA" || {
-              echo "::notice::Skipping superseded merged commit"; exit 0;
+              echo "::notice::Skipping superseded merged commit"
+              echo "publish=false" >> "$GITHUB_OUTPUT"
+              exit 0;
             }
           fi
+          echo "publish=true" >> "$GITHUB_OUTPUT"
       - name: Verify and publish
+        if: steps.gate.outputs.publish == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
