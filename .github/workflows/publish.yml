@@ -3,13 +3,25 @@ name: Publish private updater package
 on:
   push:
     branches: [main]
+  pull_request_target:
+    types: [closed]
 
 permissions:
   contents: read
   packages: write
 
+concurrency:
+  group: updater-publish-main
+  cancel-in-progress: false
+
 jobs:
   publish:
+    if: >-
+      github.event_name != 'pull_request_target' ||
+      (github.event.pull_request.merged == true &&
+       github.event.pull_request.base.ref == 'main' &&
+       github.event.pull_request.head.repo.full_name == github.repository &&
+       !contains(github.event.pull_request.title, '[skip ci]'))
     runs-on: ubuntu-latest
     steps:
       - name: Require protected main branch
@@ -18,6 +30,8 @@ jobs:
         run: |
           test "$REF_NAME" = "main" || { echo "::error::Publish only from reviewed main"; exit 1; }
       - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event_name == 'pull_request_target' && github.event.pull_request.merge_commit_sha || github.sha }}
       - uses: actions/setup-java@v6
         with:
           distribution: temurin
@@ -31,7 +45,23 @@ jobs:
         with:
           gradle-version: '9.8.2'
       # One release channel: each merge to main publishes the next 0.1.x version.
+      - name: Verify merged commit is current main
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MERGED_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = "pull_request_target" ]; then
+            current=$(gh api "repos/$GITHUB_REPOSITORY/branches/main" --jq .commit.sha)
+            test "$current" = "$MERGED_SHA" || {
+              echo "::notice::Skipping superseded merged commit"
+              echo "publish=false" >> "$GITHUB_OUTPUT"
+              exit 0;
+            }
+          fi
+          echo "publish=true" >> "$GITHUB_OUTPUT"
       - name: Verify and publish
+        if: steps.gate.outputs.publish == 'true'
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GITHUB_ACTOR: ${{ github.actor }}
