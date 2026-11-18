@@ -43,6 +43,11 @@ class ArchitectureReleaseTrackTest {
         assertNull(GitHubReleaseSource.parseTrackedReleases(all, UpdateConfig("N2K02/SEQ", "com.n2k02.seq", 155, true, "shizuku")))
     }
 
+    @Test fun legacyAppsContinueToAcceptLegacyReleases() {
+        assertEquals(18L, GitHubReleaseSource.defaultVersionCode("v1.8"))
+        assertEquals(null, UpdateConfig("N2K02/SEQ", "com.n2k02.seq", 1).releaseTrack)
+    }
+
     @Test fun tagAndAssetMustAgree() {
         assertFalse(GitHubReleaseSource.belongsToTrack("adb-v1.0", "SEQ-SHIZUKU-1.0.apk", "adb"))
         assertFalse(GitHubReleaseSource.belongsToTrack("v1.0", "SEQ-ADB-1.0.apk", "adb"))
