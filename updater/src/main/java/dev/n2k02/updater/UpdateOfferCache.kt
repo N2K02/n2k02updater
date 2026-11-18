@@ -42,8 +42,12 @@ internal object UpdateOfferSnapshot {
             release.sha256?.matches(checksumPattern) != true ||
             (release.experimental && !config.experimentalEnabled)) return null
 
+        if (config.releaseTrack != null && !GitHubReleaseSource.belongsToTrack(
+                release.tag, release.apkUrl.substringAfterLast("/"), config.releaseTrack)) return null
+
         return JSONObject()
             .put("schema", 1)
+            .put("releaseTrack", config.releaseTrack ?: "")
             .put("repository", config.repository)
             .put("packageName", config.packageName)
             .put("installedVersionCode", config.installedVersionCode)
@@ -67,6 +71,7 @@ internal object UpdateOfferSnapshot {
             if (saved.optInt("schema") != 1 ||
                 saved.optString("repository") != config.repository ||
                 saved.optString("packageName") != config.packageName ||
+                saved.optString("releaseTrack") != (config.releaseTrack ?: "") ||
                 saved.optLong("installedVersionCode") != config.installedVersionCode ||
                 saved.optBoolean("experimentalEnabled") != config.experimentalEnabled) return@runCatching null
 
@@ -76,6 +81,8 @@ internal object UpdateOfferSnapshot {
             val url = offer.getString("apkUrl")
             val checksum = offer.getString("sha256").lowercase()
             val experimental = offer.getBoolean("experimental")
+            if (config.releaseTrack != null && !GitHubReleaseSource.belongsToTrack(
+                    tag, url.substringAfterLast("/"), config.releaseTrack)) return@runCatching null
             if (tag.isBlank() || code <= config.installedVersionCode ||
                 !url.startsWith("https://") ||
                 !checksum.matches(checksumPattern) ||

@@ -15,6 +15,11 @@ class GitHubReleaseSource(
     private val readTimeoutMs: Int = 15_000,
 ) {
     fun latest(config: UpdateConfig): UpdateRelease? {
+        if (config.releaseTrack != null) {
+            // Fail closed: never use /latest or legacy unscoped releases for a tracked APK.
+            val releases = fetchReleases(config.repository, latest = false) ?: return null
+            return parseTrackedReleases(releases, config)
+        }
         val stable = fetchReleases(config.repository, latest = true)
             ?.let { parseRelease(it, config.installedVersionCode, repository = config.repository) }
         if (!config.experimentalEnabled) return stable
@@ -43,6 +48,54 @@ class GitHubReleaseSource(
     }
 
     companion object {
+        /** Only track-specific tags and APKs can update a pinned architecture. */
+        fun belongsToTrack(tag: String, assetName: String, track: String): Boolean {
+            val stable = Regex("^" + Regex.escape(track) + "-(?:sdcleaner-)?v[0-9]+[.][0-9]+$", RegexOption.IGNORE_CASE)
+            val experimental = Regex("^experimental-" + Regex.escape(track) + "-pr-[0-9]+-run-[0-9]+$", RegexOption.IGNORE_CASE)
+            val apk = Regex("^[A-Za-z0-9_.-]+-" + Regex.escape(track) + "-.+[.]apk$", RegexOption.IGNORE_CASE)
+            return (stable.matches(tag) || experimental.matches(tag)) && apk.matches(assetName)
+        }
+
+        fun parseTrackedReleases(json: String, config: UpdateConfig): UpdateRelease? {
+            val track = requireNotNull(config.releaseTrack)
+            val releases = JSONArray(json)
+            return (0 until releases.length()).mapNotNull { index ->
+                val release = releases.optJSONObject(index) ?: return@mapNotNull null
+                if (release.optBoolean("draft")) return@mapNotNull null
+                val tag = release.optString("tag_name").trim()
+                val experimental = release.optBoolean("prerelease")
+                val isCorrectTag = if (experimental)
+                    Regex("^experimental-" + Regex.escape(track) + "-pr-[0-9]+-run-[0-9]+$", RegexOption.IGNORE_CASE).matches(tag)
+                else
+                    Regex("^" + Regex.escape(track) + "-(?:sdcleaner-)?v[0-9]+[.][0-9]+$", RegexOption.IGNORE_CASE).matches(tag)
+                if (!isCorrectTag || (experimental && !config.experimentalEnabled)) return@mapNotNull null
+                val code = releaseVersionCode(release.optString("body")) ?: return@mapNotNull null
+                if (code <= config.installedVersionCode) return@mapNotNull null
+                val assets = release.optJSONArray("assets") ?: return@mapNotNull null
+                val apk = (0 until assets.length()).mapNotNull { assets.optJSONObject(it) }
+                    .firstOrNull {
+                        belongsToTrack(tag, it.optString("name"), track) &&
+                            it.optString("browser_download_url").startsWith("https://github.com/")
+                    } ?: return@mapNotNull null
+                val digest = apk.optString("digest")
+                val sha = digest.removePrefix("sha256:").lowercase()
+                    .takeIf { digest.startsWith("sha256:") && it.matches(Regex("[a-f0-9]{64}")) }
+                UpdateRelease(
+                    tag = tag,
+                    versionCode = code,
+                    notes = release.optString("body").lineSequence()
+                        .map { it.trim().removePrefix("- ").removePrefix("* ") }
+                        .filter { it.isNotBlank() && !it.startsWith("#") }
+                        .take(12).toList(),
+                    apkUrl = apk.optString("browser_download_url"),
+                    apkSize = apk.optLong("size").takeIf { it > 0 },
+                    sha256 = sha,
+                    experimental = experimental,
+                    publishedAtMillis = ReleaseDateParser.parse(release.optString("published_at")),
+                )
+            }.maxByOrNull { it.versionCode }
+        }
+
         fun releaseVersionCode(body: String): Long? =
             Regex("""(?im)^\s*Version code:\s*(\d+)\s*$""")
                 .find(body)?.groupValues?.get(1)?.toLongOrNull()
