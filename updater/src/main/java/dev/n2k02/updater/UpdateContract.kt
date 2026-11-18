@@ -6,6 +6,8 @@ data class UpdateConfig(
     val packageName: String,
     val installedVersionCode: Long,
     val experimentalEnabled: Boolean = false,
+    /** Null retains legacy unfiltered releases; adb/shizuku locks the installed architecture. */
+    val releaseTrack: String? = null,
 ) {
     init {
         require(Regex("[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+").matches(repository)) {
@@ -13,6 +15,7 @@ data class UpdateConfig(
         }
         require(packageName.isNotBlank())
         require(installedVersionCode >= 0)
+        require(releaseTrack == null || releaseTrack == "adb" || releaseTrack == "shizuku")
     }
 }
 
