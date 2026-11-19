@@ -1,0 +1,70 @@
+name: Legacy ADB in-place install verification
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/legacy-install-test.yml'
+      - '.github/scripts/legacy-install-smoke.sh'
+permissions:
+  contents: read
+jobs:
+  verify:
+    name: In-place update and rollback rejection (${{ matrix.app }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - app: "SEQ"
+            package: "com.n2k02.seq"
+            old_url: "https://github.com/N2K02/SEQ/releases/download/v0.7/SEQ-0.7.apk"
+            old_sha: "7dbd31a87873060a0383cfe59a139a13e059b814b2b30faaab7b7ac97d19db1d"
+            old_code: 100260
+            new_url: "https://github.com/N2K02/SEQ/releases/download/adb-v0.9/SEQ-ADB-0.9.apk"
+            new_sha: "9492b94ea37ded21c58cc4aeb7ec42d3b4f8e4ee9f5ce01353164bcdb0191b99"
+            new_code: 100308
+          - app: "VREC"
+            package: "com.vrec.app"
+            old_url: "https://github.com/N2K02/VREC/releases/download/v7.7/VREC-7.7.apk"
+            old_sha: "7721f5fbfdc59c08800c3d773b51c6adaa896e8559a39f84f153c06f91474695"
+            old_code: 101194
+            new_url: "https://github.com/N2K02/VREC/releases/download/adb-v8.1/VREC-ADB-8.1.apk"
+            new_sha: "beb21258c498cd0c4e14b7b2d379a55a01d0a164f4ef2c6cf6ac3f4c5acab1fa"
+            new_code: 101265
+          - app: "SDCleaner"
+            package: "dev.n2k02.sdcleaner"
+            old_url: "https://github.com/N2K02/SDCleaner/releases/download/sdcleaner-v2.3/SDCleaner-2.3.apk"
+            old_sha: "440f7d60fbbbc7753c0c13fc8202c6070512d49a0a19186c24f7be0746a267bd"
+            old_code: 100264
+            new_url: "https://github.com/N2K02/SDCleaner/releases/download/adb-sdcleaner-v2.5/SDCleaner-ADB-2.5.apk"
+            new_sha: "a8ad81af2f975c431dcb081ad0673b9af1670275c87ab82e3a29a397e44cf362"
+            new_code: 100375
+    env:
+      APK_PACKAGE: ${{ matrix.package }}
+      OLD_APK_URL: ${{ matrix.old_url }}
+      OLD_APK_SHA: ${{ matrix.old_sha }}
+      OLD_CODE: ${{ matrix.old_code }}
+      NEW_APK_URL: ${{ matrix.new_url }}
+      NEW_APK_SHA: ${{ matrix.new_sha }}
+      NEW_CODE: ${{ matrix.new_code }}
+    steps:
+      - uses: actions/checkout@v7
+      - name: Enable KVM access for the hosted emulator
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+      - name: Check in-place installation and data continuity
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: default
+          arch: x86_64
+          emulator-options: -no-window -gpu swiftshader_indirect -no-snapshot -noaudio -no-boot-anim
+          script: bash .github/scripts/legacy-install-smoke.sh
+      - name: Preserve install verification
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: legacy-install-${{ matrix.app }}
+          path: ${{ runner.temp }}/legacy-install/*.txt
