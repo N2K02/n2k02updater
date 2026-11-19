@@ -2,6 +2,16 @@ name: Refresh APK download index
 
 on:
   workflow_call:
+    inputs:
+      legacy_from_tag:
+        type: string
+        default: ''
+      legacy_adb_tag:
+        type: string
+        default: ''
+      legacy_adb_digest:
+        type: string
+        default: ''
 
 permissions:
   contents: write
@@ -112,3 +122,28 @@ jobs:
               gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --notes-file "$file"
             fi
           done < "$RUNNER_TEMP/apk-release-tags.txt"
+      - name: Expose verified stable ADB to legacy GitHub clients
+        if: inputs.legacy_adb_tag != ''
+        shell: bash
+        env:
+          LEGACY_FROM_TAG: ${{ inputs.legacy_from_tag }}
+          LEGACY_ADB_TAG: ${{ inputs.legacy_adb_tag }}
+          LEGACY_ADB_DIGEST: ${{ inputs.legacy_adb_digest }}
+        run: |
+          set -euo pipefail
+          current=$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)
+          if [[ "$current" == "$LEGACY_ADB_TAG" ]]; then exit 0; fi
+          if [[ "$current" != "$LEGACY_FROM_TAG" ]]; then
+            echo "::notice::Legacy latest was updated independently. Keeping $current."
+            exit 0
+          fi
+          [[ "$LEGACY_ADB_TAG" =~ ^adb-(sdcleaner-)?v[0-9]+[.][0-9]+$ ]]
+          [[ "$LEGACY_ADB_DIGEST" =~ ^sha256:[a-f0-9]{64}$ ]]
+          gh api "repos/$GITHUB_REPOSITORY/releases/tags/$LEGACY_ADB_TAG" |
+            jq -e --arg digest "$LEGACY_ADB_DIGEST" '
+              .draft == false and .prerelease == false and
+              ([.assets[] | select(.name | endswith(".apk"))] |
+                length == 1 and .[0].digest == $digest and (.[0].name | contains("-ADB-")))
+            ' >/dev/null
+          gh release edit "$LEGACY_ADB_TAG" --repo "$GITHUB_REPOSITORY" --latest
+          test "$(gh api "repos/$GITHUB_REPOSITORY/releases/latest" --jq .tag_name)" = "$LEGACY_ADB_TAG"
