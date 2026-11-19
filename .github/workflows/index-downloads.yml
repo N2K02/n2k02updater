@@ -1,0 +1,100 @@
+name: Refresh APK download index
+
+on:
+  workflow_call:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: apk-download-index-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  index:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Find signed-release assets and generate index
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/releases?per_page=100" > "$RUNNER_TEMP/apk-releases.json"
+          python3 - "$RUNNER_TEMP" "$GITHUB_REPOSITORY" <<'PY'
+          import json
+          from pathlib import Path
+          import re
+          import sys
+
+          temp, repository = Path(sys.argv[1]), sys.argv[2]
+          app = repository.split("/", 1)[1]
+          root = f"https://github.com/{repository}/releases"
+          best = {}
+          pages = json.loads((temp / "apk-releases.json").read_text())
+          for page in pages:
+              for release in page:
+                  if release.get("draft") is not False:
+                      continue
+                  tag = release.get("tag_name", "")
+                  experimental = release.get("prerelease")
+                  if experimental is True:
+                      match = re.fullmatch(r"experimental-(adb|shizuku)-pr-\d+-run-\d+", tag)
+                  elif experimental is False:
+                      match = re.fullmatch(r"(adb|shizuku)-(?:sdcleaner-)?v(\d+\.\d+)", tag)
+                  else:
+                      continue
+                  if not match:
+                      continue
+                  codes = re.findall(r"(?im)^\s*Version code:[ \t]*(\d+)[ \t]*$", release.get("body") or "")
+                  if len(codes) != 1 or int(codes[0]) <= 0:
+                      continue
+                  track = match[1].upper()
+                  version = r"\d+\.\d+-experimental\.\d+" if experimental else re.escape(match[2])
+                  files = []
+                  for asset in release.get("assets", []):
+                      name = asset.get("name", "")
+                      url = asset.get("browser_download_url", "")
+                      if (re.fullmatch(rf"{re.escape(app)}-{track}-{version}\.apk", name, re.I)
+                          and url.lower() == f"{root}/download/{tag}/{name}".lower()
+                          and re.fullmatch(r"sha256:[0-9a-f]{64}", asset.get("digest") or "")
+                          and asset.get("state") == "uploaded"):
+                          files.append((name, url))
+                  key = track, experimental
+                  if len(files) == 1 and (key not in best or int(codes[0]) > best[key][0]):
+                      best[key] = int(codes[0]), files[0]
+
+          if not best:
+              raise SystemExit("No uploaded architecture APK passed the release contract.")
+          lines = [
+              "Download the APK for your installed architecture and channel.",
+              "",
+              "| Architecture | Stable | Experimental |",
+              "| --- | --- | --- |",
+          ]
+          for track in ("ADB", "SHIZUKU"):
+              cells = []
+              for experimental in (False, True):
+                  item = best.get((track, experimental))
+                  name, url = item[1] if item else (None, None)
+                  cells.append(f"[{name}]({url})" if item else "Unavailable")
+              lines.append(f"| {track} | {cells[0]} | {cells[1]} |")
+          lines.extend([
+              "",
+              "ADB uses integrated Wireless debugging. Shizuku uses an external Shizuku Server.",
+              "Each release track has its own version history and signed APK.",
+              "",
+              f"[All versioned releases]({root})",
+          ])
+          (temp / "apk-downloads.md").write_text("\n".join(lines) + "\n")
+          PY
+      - name: Publish or refresh the download index
+        shell: bash
+        run: |
+          set -euo pipefail
+          title="APK downloads · ADB and Shizuku"
+          if gh release view download-index --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release edit download-index --repo "$GITHUB_REPOSITORY" --title "$title" --prerelease --latest=false --notes-file "$RUNNER_TEMP/apk-downloads.md"
+          else
+            gh release create download-index --repo "$GITHUB_REPOSITORY" --title "$title" --prerelease --latest=false --notes-file "$RUNNER_TEMP/apk-downloads.md"
+          fi
