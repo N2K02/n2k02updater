@@ -62,7 +62,7 @@ jobs:
                           files.append((name, url))
                   key = track, experimental
                   if len(files) == 1 and (key not in best or int(codes[0]) > best[key][0]):
-                      best[key] = int(codes[0]), files[0]
+                      best[key] = int(codes[0]), files[0], tag
 
           if not best:
               raise SystemExit("No uploaded architecture APK passed the release contract.")
@@ -86,6 +86,7 @@ jobs:
               "",
               f"[All versioned releases]({root})",
           ])
+          (temp / "apk-release-tags.txt").write_text("".join(f"{item[2]}\n" for item in best.values()))
           (temp / "apk-downloads.md").write_text("\n".join(lines) + "\n")
           PY
       - name: Publish or refresh the download index
@@ -98,3 +99,16 @@ jobs:
           else
             gh release create download-index --repo "$GITHUB_REPOSITORY" --title "$title" --prerelease --latest=false --notes-file "$RUNNER_TEMP/apk-downloads.md"
           fi
+      - name: Link the index from current APK releases
+        shell: bash
+        run: |
+          set -euo pipefail
+          link="[All APK downloads](https://github.com/$GITHUB_REPOSITORY/releases/tag/download-index)"
+          while IFS= read -r tag; do
+            file="$RUNNER_TEMP/apk-release-note.md"
+            gh release view "$tag" --repo "$GITHUB_REPOSITORY" --json body --jq .body > "$file"
+            if ! grep -Fq "$link" "$file"; then
+              printf '\n%s\n' "$link" >> "$file"
+              gh release edit "$tag" --repo "$GITHUB_REPOSITORY" --notes-file "$file"
+            fi
+          done < "$RUNNER_TEMP/apk-release-tags.txt"
