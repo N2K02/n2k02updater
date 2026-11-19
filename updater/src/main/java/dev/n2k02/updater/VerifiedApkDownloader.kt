@@ -154,7 +154,7 @@ class VerifiedApkDownloader(private val context: Context) {
                 throw IOException("APK checksum mismatch")
             }
             try {
-                verifyPackage(partial, config)
+                verifyPackage(partial, config, release.versionCode)
             } catch (error: Exception) {
                 partial.delete()
                 throw error
@@ -193,7 +193,7 @@ class VerifiedApkDownloader(private val context: Context) {
         throw IOException("Too many APK redirects")
     }
 
-    private fun verifyPackage(file: File, config: UpdateConfig) {
+    private fun verifyPackage(file: File, config: UpdateConfig, advertisedVersion: Long) {
         val pm = context.packageManager
         val flags = if (Build.VERSION.SDK_INT >= 28) PackageManager.GET_SIGNING_CERTIFICATES
             else PackageManager.GET_SIGNATURES
@@ -212,25 +212,25 @@ class VerifiedApkDownloader(private val context: Context) {
         } else {
             pm.getPackageInfo(config.packageName, flags)
         }
-        @Suppress("DEPRECATION")
-        val archiveSigners = if (Build.VERSION.SDK_INT >= 28) {
-            archive.signingInfo?.let { info ->
-                (if (info.hasMultipleSigners()) info.apkContentsSigners
-                else info.signingCertificateHistory)?.map { it.toCharsString() }?.toSet()
-            }
-        } else archive.signatures?.map { it.toCharsString() }?.toSet()
-        @Suppress("DEPRECATION")
-        val trustedSigners = if (Build.VERSION.SDK_INT >= 28) {
-            installed.signingInfo?.let { info ->
-                (if (info.hasMultipleSigners()) info.apkContentsSigners
-                else info.signingCertificateHistory)?.map { it.toCharsString() }?.toSet()
-            }
-        } else installed.signatures?.map { it.toCharsString() }?.toSet()
-        // Shared signing history is a compatibility preflight; Android remains the
-        // authority on whether a lineage is valid for the installed package.
-        if (archiveSigners.isNullOrEmpty() || trustedSigners.isNullOrEmpty() ||
-            archiveSigners.intersect(trustedSigners).isEmpty()) {
-            throw IOException("APK signing certificate does not match installed app")
+        if (config.releaseTrack != null && version != advertisedVersion) {
+            throw IOException("APK version does not match release metadata")
         }
+        @Suppress("DEPRECATION")
+        val compatible = if (Build.VERSION.SDK_INT >= 28) {
+            val incoming = archive.signingInfo
+            val current = installed.signingInfo
+            signingCertificatesMatch(
+                installedSigners = current?.apkContentsSigners?.map { it.toCharsString() }.orEmpty(),
+                archiveSigners = incoming?.apkContentsSigners?.map { it.toCharsString() }.orEmpty(),
+                archiveHistory = incoming?.signingCertificateHistory?.map { it.toCharsString() }.orEmpty(),
+            )
+        } else {
+            signingCertificatesMatch(
+                installedSigners = installed.signatures?.map { it.toCharsString() }.orEmpty(),
+                archiveSigners = archive.signatures?.map { it.toCharsString() }.orEmpty(),
+                archiveHistory = emptyList(),
+            )
+        }
+        if (!compatible) throw IOException("APK signing certificate does not match installed app")
     }
 }
