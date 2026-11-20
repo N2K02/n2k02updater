@@ -1,0 +1,128 @@
+name: Group release downloads
+
+on:
+  workflow_call:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: grouped-release-downloads-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  group:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Publish Stable and Experimental download entries
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          import hashlib
+          import json
+          import os
+          from pathlib import Path
+          import re
+          import subprocess
+          import tempfile
+
+          def run(*args):
+              return subprocess.run(["gh", *args], check=True, text=True, stdout=subprocess.PIPE).stdout
+
+          def select(releases, app, root):
+              choices = {}
+              for release in releases:
+                  if release["draft"]:
+                      continue
+                  channel = "experimental" if release["prerelease"] else "stable"
+                  tag = release["tag_name"]
+                  pattern = (r"experimental-(adb|shizuku)-pr-\d+-run-\d+" if release["prerelease"]
+                             else r"(adb|shizuku)-(?:sdcleaner-)?v(\d+\.\d+)")
+                  parsed = re.fullmatch(pattern, tag)
+                  codes = re.findall(r"(?im)^Version code:[ \t]*(\d+)[ \t]*$", release.get("body") or "")
+                  if not parsed or len(codes) != 1:
+                      continue
+                  track = parsed[1].upper()
+                  version = r"\d+\.\d+-experimental\.\d+" if release["prerelease"] else re.escape(parsed[2])
+                  expected = rf"{re.escape(app)}-{track}-{version}\.apk"
+                  assets = [
+                      asset for asset in release["assets"]
+                      if re.fullmatch(expected, asset["name"])
+                      and asset["browser_download_url"] == f"{root}/download/{tag}/{asset['name']}"
+                      and re.fullmatch(r"sha256:[a-f0-9]{64}", asset.get("digest") or "")
+                      and asset["state"] == "uploaded" and asset["size"] > 0
+                  ]
+                  key = channel, track
+                  if len(assets) == 1 and int(codes[0]) > choices.get(key, (0,))[0]:
+                      choices[key] = (int(codes[0]), tag, assets[0])
+              return choices
+
+          def group(repo, channel, choices, existing):
+              tag = f"downloads-{channel}"
+              title = f"{channel.title()} downloads · ADB and Shizuku"
+              marker = f"<!-- n2k02-download-group:{channel} -->"
+              if not choices:
+                  print(f"{channel}: no architecture APKs available")
+                  return
+              experimental = channel == "experimental"
+              if existing and (not (existing.get("body") or "").startswith(marker)
+                  or existing["prerelease"] != experimental or existing["draft"]):
+                  raise RuntimeError(f"Refusing to modify an unmanaged release: {tag}")
+              kept = {asset["name"]: asset for asset in existing["assets"]} if existing else {}
+              notes = [marker, f"# {title}", "", "| Architecture | Official APK |", "| --- | --- |"]
+              with tempfile.TemporaryDirectory() as work:
+                  uploads = []
+                  for track in ("ADB", "SHIZUKU"):
+                      if track not in choices:
+                          notes.append(f"| {track} | Unavailable |")
+                          continue
+                      _, source, asset = choices[track]
+                      name, digest = asset["name"], asset["digest"]
+                      notes.append(f"| {track} | [{name}]({asset['browser_download_url']}) |")
+                      if name in kept:
+                          if kept[name].get("digest") != digest:
+                              raise RuntimeError(f"Grouped APK digest differs from canonical asset: {name}")
+                          continue
+                      run("release", "download", source, "--repo", repo, "--pattern", name, "--dir", work)
+                      path = Path(work) / name
+                      with path.open("rb") as apk:
+                          actual = hashlib.file_digest(apk, "sha256").hexdigest()
+                      if f"sha256:{actual}" != digest or path.stat().st_size != asset["size"]:
+                          raise RuntimeError(f"Canonical APK checksum or size mismatch: {name}")
+                      uploads.append(str(path))
+                  notes.extend(["", "Install the APK for your architecture. In-app updates use the linked versioned releases."])
+                  body = "\n".join(notes) + "\n"
+                  if existing:
+                      if uploads:
+                          run("release", "upload", tag, *uploads, "--repo", repo)
+                      if body != existing.get("body"):
+                          run("release", "edit", tag, "--repo", repo, "--notes", body)
+                      # Only remove superseded copies from this managed entry after
+                      # the replacement is uploaded. Canonical releases are retained.
+                      for track, (_, _, asset) in choices.items():
+                          prefix = f"{repo.split('/')[1]}-{track}-"
+                          for name in kept:
+                              if name.startswith(prefix) and name.endswith(".apk") and name != asset["name"]:
+                                  run("release", "delete-asset", tag, name, "--repo", repo, "--yes")
+                  else:
+                      args = ["release", "create", tag, *uploads, "--repo", repo, "--title", title,
+                              "--notes", body, "--latest=false"]
+                      if experimental:
+                          args.append("--prerelease")
+                      run(*args)
+              print(f"https://github.com/{repo}/releases/tag/{tag}")
+
+          repo = os.environ["GITHUB_REPOSITORY"]
+          app = repo.split("/")[1]
+          root = f"https://github.com/{repo}/releases"
+          releases = [item for page in json.loads(run("api", "--paginate", "--slurp",
+                      f"repos/{repo}/releases?per_page=100")) for item in page]
+          selected = select(releases, app, root)
+          managed = {item["tag_name"]: item for item in releases}
+          for channel in ("stable", "experimental"):
+              choices = {track: value for (lane, track), value in selected.items() if lane == channel}
+              group(repo, channel, choices, managed.get(f"downloads-{channel}"))
+          PY
