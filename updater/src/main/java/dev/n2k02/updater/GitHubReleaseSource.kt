@@ -48,38 +48,51 @@ class GitHubReleaseSource(
     }
 
     companion object {
-        /** Only track-specific tags and APKs can update a pinned architecture. */
+        private val sha256Pattern = Regex("sha256:([a-fA-F0-9]{64})")
+
+        /** The stable tag encodes the version. Experimental tags encode PR and run. */
         fun belongsToTrack(tag: String, assetName: String, track: String): Boolean {
-            val stable = Regex("^" + Regex.escape(track) + "-(?:sdcleaner-)?v[0-9]+[.][0-9]+$", RegexOption.IGNORE_CASE)
-            val experimental = Regex("^experimental-" + Regex.escape(track) + "-pr-[0-9]+-run-[0-9]+$", RegexOption.IGNORE_CASE)
-            val apk = Regex("^[A-Za-z0-9_.-]+-" + Regex.escape(track) + "-.+[.]apk$", RegexOption.IGNORE_CASE)
-            return (stable.matches(tag) || experimental.matches(tag)) && apk.matches(assetName)
+            val architecture = Regex.escape(track)
+            val stable = Regex("^$architecture-(?:sdcleaner-)?v([0-9]+[.][0-9]+)$", RegexOption.IGNORE_CASE)
+            val experimental = Regex("^experimental-$architecture-pr-[0-9]+-run-[0-9]+$", RegexOption.IGNORE_CASE)
+            val version = stable.matchEntire(tag)?.groupValues?.get(1)
+            val suffix = when {
+                version != null -> Regex.escape(version)
+                experimental.matches(tag) -> "[0-9]+[.][0-9]+-experimental[.][0-9]+"
+                else -> return false
+            }
+            return Regex("^[A-Za-z0-9_][A-Za-z0-9_-]*-$architecture-$suffix[.]apk$", RegexOption.IGNORE_CASE)
+                .matches(assetName)
+        }
+
+        private fun isCanonicalAssetUrl(url: String, repository: String, tag: String, name: String): Boolean {
+            val prefix = "https://github.com/$repository/releases/download/"
+            return url.startsWith(prefix, ignoreCase = true) && url.substring(prefix.length) == "$tag/$name"
         }
 
         fun parseTrackedReleases(json: String, config: UpdateConfig): UpdateRelease? {
             val track = requireNotNull(config.releaseTrack)
-            val releases = JSONArray(json)
+            val releases = runCatching { JSONArray(json) }.getOrNull() ?: return null
             return (0 until releases.length()).mapNotNull { index ->
                 val release = releases.optJSONObject(index) ?: return@mapNotNull null
-                if (release.optBoolean("draft")) return@mapNotNull null
-                val tag = release.optString("tag_name").trim()
-                val experimental = release.optBoolean("prerelease")
-                val isCorrectTag = if (experimental)
-                    Regex("^experimental-" + Regex.escape(track) + "-pr-[0-9]+-run-[0-9]+$", RegexOption.IGNORE_CASE).matches(tag)
-                else
-                    Regex("^" + Regex.escape(track) + "-(?:sdcleaner-)?v[0-9]+[.][0-9]+$", RegexOption.IGNORE_CASE).matches(tag)
-                if (!isCorrectTag || (experimental && !config.experimentalEnabled)) return@mapNotNull null
-                val code = releaseVersionCode(release.optString("body")) ?: return@mapNotNull null
+                if (release.opt("draft") != false) return@mapNotNull null
+                val tag = release.optString("tag_name")
+                val experimental = release.opt("prerelease") as? Boolean ?: return@mapNotNull null
+                if (experimental != tag.startsWith("experimental-", ignoreCase = true) ||
+                    experimental && !config.experimentalEnabled
+                ) return@mapNotNull null
+                val code = trackedVersionCode(release.optString("body")) ?: return@mapNotNull null
                 if (code <= config.installedVersionCode) return@mapNotNull null
                 val assets = release.optJSONArray("assets") ?: return@mapNotNull null
                 val apk = (0 until assets.length()).mapNotNull { assets.optJSONObject(it) }
-                    .firstOrNull {
-                        belongsToTrack(tag, it.optString("name"), track) &&
-                            it.optString("browser_download_url").startsWith("https://github.com/")
+                    .singleOrNull {
+                        val name = it.optString("name")
+                        name.startsWith(config.repository.substringAfter('/') + "-", ignoreCase = true) &&
+                            belongsToTrack(tag, name, track) &&
+                            isCanonicalAssetUrl(it.optString("browser_download_url"), config.repository, tag, name)
                     } ?: return@mapNotNull null
-                val digest = apk.optString("digest")
-                val sha = digest.removePrefix("sha256:").lowercase()
-                    .takeIf { digest.startsWith("sha256:") && it.matches(Regex("[a-f0-9]{64}")) }
+                val sha = sha256Pattern.matchEntire(apk.optString("digest"))?.groupValues?.get(1)?.lowercase()
+                    ?: return@mapNotNull null
                 UpdateRelease(
                     tag = tag,
                     versionCode = code,
@@ -95,6 +108,10 @@ class GitHubReleaseSource(
                 )
             }.maxByOrNull { it.versionCode }
         }
+
+        private fun trackedVersionCode(body: String): Long? =
+            Regex("""(?im)^[ \t]*Version code:[ \t]*(\d+)[ \t]*$""")
+                .findAll(body).singleOrNull()?.groupValues?.get(1)?.toLongOrNull()?.takeIf { it > 0 }
 
         fun releaseVersionCode(body: String): Long? =
             Regex("""(?im)^\s*Version code:\s*(\d+)\s*$""")

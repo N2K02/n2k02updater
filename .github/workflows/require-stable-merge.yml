@@ -1,0 +1,47 @@
+name: Require an approved stable merge
+on:
+  workflow_call:
+permissions:
+  contents: read
+  pull-requests: read
+jobs:
+  approval:
+    runs-on: ubuntu-latest
+    env:
+      GH_TOKEN: ${{ github.token }}
+    steps:
+      - name: Verify the pushed commit was merged through a protected branch PR
+        if: github.event_name == 'push'
+        shell: bash
+        run: |
+          set -euo pipefail
+          case "$GITHUB_REF" in
+            refs/heads/main-adb|refs/heads/main-shizuku) ;;
+            *) echo "::error::Stable publication requires a permanent architecture branch."; exit 1 ;;
+          esac
+          [[ "$GITHUB_SHA" =~ ^[0-9a-f]{40}$ ]]
+          filter='any(.[][]; .state == "closed" and .merged_at != null and
+              .base.ref == $branch and .base.repo.full_name == $repo and .merge_commit_sha == $sha)'
+          approved=false
+          for delay in 0 2 4; do
+            sleep "$delay"
+            if gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/commits/$GITHUB_SHA/pulls" |
+                jq -e --arg branch "$GITHUB_REF_NAME" --arg sha "$GITHUB_SHA" --arg repo "$GITHUB_REPOSITORY" "$filter" >/dev/null; then
+              approved=true
+              break
+            fi
+          done
+          if [[ "$approved" != true ]]; then
+            echo "::error::No merged pull request matches this exact stable branch and commit."
+            exit 1
+          fi
+          gh api "repos/$GITHUB_REPOSITORY/rules/branches/$GITHUB_REF_NAME" |
+            jq -e 'map(.type) as $rules |
+              ["pull_request", "non_fast_forward", "deletion", "required_status_checks"] |
+              all(. as $rule | $rules | index($rule) != null)' >/dev/null || {
+              echo "::error::The stable branch requires active PR, CI, force-push and deletion rules."
+              exit 1
+            }
+      - name: Experimental builds use the architecture PR workflow
+        if: github.event_name == 'pull_request'
+        run: echo "Experimental PR verified by the caller workflow."
