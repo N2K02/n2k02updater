@@ -122,7 +122,21 @@ jobs:
                       f"repos/{repo}/releases?per_page=100")) for item in page]
           selected = select(releases, app, root)
           managed = {item["tag_name"]: item for item in releases}
+          canonical = None
+          stable = selected.get(("stable", "ADB")) or selected.get(("stable", "SHIZUKU"))
+          if stable:
+              latest = json.loads(run("api", f"repos/{repo}/releases/latest"))["tag_name"]
+              canonical = stable[1] if latest == "downloads-stable" else latest
+              if "downloads-stable" not in managed or latest == "downloads-stable":
+                  run("release", "edit", canonical, "--repo", repo, "--latest")
           for channel in ("stable", "experimental"):
               choices = {track: value for (lane, track), value in selected.items() if lane == channel}
               group(repo, channel, choices, managed.get(f"downloads-{channel}"))
+          if canonical:
+              latest = json.loads(run("api", f"repos/{repo}/releases/latest"))["tag_name"]
+              if latest == "downloads-stable":
+                  run("release", "edit", canonical, "--repo", repo, "--latest")
+                  latest = json.loads(run("api", f"repos/{repo}/releases/latest"))["tag_name"]
+              if latest == "downloads-stable":
+                  raise RuntimeError("The grouped entry must never be the latest updater release")
           PY
