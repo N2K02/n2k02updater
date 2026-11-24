@@ -5,7 +5,7 @@ plugins {
 }
 android {
     namespace = "dev.n2k02.updater"
-    compileSdk { version = release(37) { minorApiLevel = 0 } }
+    compileSdk { version = release(37) { minorApiLevel = 2 } }
     defaultConfig { minSdk = 26 }
     buildFeatures { compose = true }
     publishing { singleVariant("release") { withSourcesJar() } }
@@ -20,8 +20,8 @@ dependencies {
     implementation("androidx.core:core:1.19.1")
     testImplementation("junit:junit:4.13.2")
     testImplementation("org.json:json:20260814")
-    implementation(platform("androidx.compose:compose-bom:2026.09.00"))
-    implementation("androidx.compose.material3:material3:1.5.0-rc01")
+    implementation(platform("androidx.compose:compose-bom:2026.11.01"))
+    implementation("androidx.compose.material3:material3:1.6.0-alpha01")
     implementation("androidx.compose.ui:ui")
     implementation("androidx.compose.material:material-icons-extended")
     implementation("androidx.compose.animation:animation")
