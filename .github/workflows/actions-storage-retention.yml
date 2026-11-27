@@ -111,6 +111,15 @@ jobs:
               if(r.conclusion==='success'&&!green.has(k)){green.add(k);keepRuns.add(r.id);}
               if(retainedNumbers.has(r.run_number)&&/build|apk|ci|release/i.test(r.name+' '+r.path))keepRuns.add(r.id);
             }
+            if(repo==='Manual-Sales'){
+              const builds=runs.filter(r=>r.name==='Windows portable build'&&r.status==='completed'&&r.conclusion==='success');
+              const stable=builds.find(r=>/^v\d+\.\d+/.test(r.head_branch||''))||builds.find(r=>r.head_branch==='main');
+              const experimental=builds.find(r=>/^experimental(?:\/|$)/i.test(r.head_branch||''));
+              if(stable&&experimental){
+                for(const r of runs)if(r.name==='Windows portable build'&&r.status==='completed'&&!heads.has(r.head_sha)&&r.id!==stable.id&&r.id!==experimental.id)keepRuns.delete(r.id);
+                keepRuns.add(stable.id);keepRuns.add(experimental.id);
+              }
+            }
             const obsolete=new Set(runs.filter(r=>r.status==='completed'&&!keepRuns.has(r.id)).map(r=>r.id));
             const artifacts=await github.paginate(github.rest.actions.listArtifactsForRepo,{owner,repo,per_page:100});
             let removedArtifacts=0,bytes=0,removedRuns=0,removedReleases=0,removedTags=0,removedCaches=0,cacheBytes=0;
